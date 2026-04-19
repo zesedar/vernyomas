@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b1220">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Tensio — Vérnyomás napló</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,600;9..144,700&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ APP SHELL ============ -->
+<div class="app" id="app">
+
+  <!-- NAV / HEADER -->
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M16 3 C 9 10, 4 14, 4 20 a12 12 0 0 0 24 0 C 28 14, 23 10, 16 3 Z" stroke="currentColor" stroke-width="1.6" fill="none"/>
+        <path d="M8 19 h4 l2 -5 l3 10 l2 -5 h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <div>
+        <div class="brand-name">Tensio</div>
+        <div class="brand-sub">vérnyomás napló</div>
+      </div>
+    </div>
+    <button class="icon-btn" id="settingsBtn" aria-label="Beállítások">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </header>
+
+  <!-- VIEWS -->
+  <main class="views">
+
+    <!-- =========== DASHBOARD =========== -->
+    <section class="view active" data-view="dashboard">
+
+      <div class="hero">
+        <div class="hero-label">mai nap</div>
+        <div class="hero-main" id="todayStatus">
+          <div class="hero-big" id="todayAvg">—</div>
+          <div class="hero-unit">Hgmm</div>
+        </div>
+        <div class="hero-sub" id="todaySub">Még nincs mérés ma</div>
+      </div>
+
+      <div class="cat-card" id="catCard">
+        <div class="cat-bar" id="catBar"></div>
+        <div class="cat-content">
+          <div class="cat-label" id="catLabel">Nincs adat</div>
+          <div class="cat-desc" id="catDesc">Vegyél fel egy mérést az értékeléshez.</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="stat-card">
+          <div class="stat-label">7 napos átlag</div>
+          <div class="stat-value" id="avg7">—</div>
+          <div class="stat-sub" id="avg7n">0 mérés</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">30 napos átlag</div>
+          <div class="stat-value" id="avg30">—</div>
+          <div class="stat-sub" id="avg30n">0 mérés</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Pulzusnyomás</div>
+          <div class="stat-value" id="ppAvg">—</div>
+          <div class="stat-sub">7 napos átlag</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">MAP</div>
+          <div class="stat-value" id="mapAvg">—</div>
+          <div class="stat-sub">7 napos átlag</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head">
+          <div>
+            <div class="chart-title">Trend</div>
+            <div class="chart-sub">szisztolés / diasztolés időben</div>
+          </div>
+          <div class="chart-tabs" id="rangeTabs">
+            <button class="chip" data-range="7">7N</button>
+            <button class="chip active" data-range="30">30N</button>
+            <button class="chip" data-range="90">90N</button>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head">
+          <div>
+            <div class="chart-title">Reggeli vs. esti</div>
+            <div class="chart-sub">7 napos átlagok</div>
+          </div>
+        </div>
+        <div class="chart-wrap compact"><canvas id="amPmChart"></canvas></div>
+        <div class="ampm-note" id="ampmNote"></div>
+      </div>
+
+      <div class="edu-card">
+        <div class="edu-title">Mit jelentenek a számok?</div>
+        <div class="edu-body">
+          <p><strong>Szisztolés</strong> — a szív összehúzódásakor mért nyomás (felső érték). <strong>Diasztolés</strong> — a szív elernyedésekor mért nyomás (alsó érték).</p>
+          <p><strong>Pulzusnyomás</strong> = szisztolés − diasztolés. Egészséges tartomány ~30–50 Hgmm. Tartósan magas érték (&gt;60) az érfal merevségére utalhat.</p>
+          <p><strong>MAP</strong> (átlagos artériás nyomás) ≈ diasztolés + ⅓ × pulzusnyomás. Normál: 70–100 Hgmm.</p>
+          <p class="edu-disclaimer">Az alkalmazás nem helyettesíti az orvosi vizsgálatot. Eltérés esetén konzultálj háziorvossal.</p>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- =========== ADD MEASUREMENT =========== -->
+    <section class="view" data-view="add">
+      <div class="sheet-head">
+        <div class="sheet-title">Új mérés</div>
+        <div class="sheet-sub" id="addTimestamp"></div>
+      </div>
+
+      <form id="addForm" class="form">
+        <div class="input-row">
+          <label class="field">
+            <span class="field-label">Szisztolés</span>
+            <div class="field-input">
+              <input type="number" id="sys" inputmode="numeric" min="50" max="260" required placeholder="120">
+              <span class="field-unit">Hgmm</span>
+            </div>
+          </label>
+          <label class="field">
+            <span class="field-label">Diasztolés</span>
+            <div class="field-input">
+              <input type="number" id="dia" inputmode="numeric" min="30" max="180" required placeholder="80">
+              <span class="field-unit">Hgmm</span>
+            </div>
+          </label>
+        </div>
+
+        <label class="field">
+          <span class="field-label">Pulzus</span>
+          <div class="field-input">
+            <input type="number" id="pulse" inputmode="numeric" min="25" max="220" required placeholder="72">
+            <span class="field-unit">/perc</span>
+          </div>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Időpont</span>
+          <div class="field-input">
+            <input type="datetime-local" id="ts" required>
+          </div>
+        </label>
+
+        <div class="form-actions">
+          <button type="button" class="btn ghost" id="cancelAdd">Mégse</button>
+          <button type="submit" class="btn primary">Mentés</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- =========== HISTORY =========== -->
+    <section class="view" data-view="history">
+      <div class="sheet-head">
+        <div class="sheet-title">Napló</div>
+        <div class="sheet-sub" id="historyCount">0 bejegyzés</div>
+      </div>
+      <div class="history-list" id="historyList"></div>
+    </section>
+
+  </main>
+
+  <!-- BOTTOM NAV -->
+  <nav class="tabbar">
+    <button class="tab active" data-goto="dashboard">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12 L12 4 L21 12"/><path d="M5 10 V20 H19 V10"/></svg>
+      <span>Áttekintés</span>
+    </button>
+    <button class="tab tab-add" data-goto="add" aria-label="Új mérés">
+      <div class="add-inner">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5 V19 M5 12 H19"/></svg>
+      </div>
+    </button>
+    <button class="tab" data-goto="history">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6 H21 M3 12 H21 M3 18 H21"/></svg>
+      <span>Napló</span>
+    </button>
+  </nav>
+
+</div>
+
+<!-- ============ SETTINGS MODAL ============ -->
+<div class="modal" id="settingsModal" aria-hidden="true">
+  <div class="modal-backdrop" data-close-modal></div>
+  <div class="modal-body">
+    <div class="modal-head">
+      <div class="sheet-title">Beállítások</div>
+      <button class="icon-btn" data-close-modal aria-label="Bezár">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6 L18 18 M18 6 L6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-title">Emlékeztetők</div>
+      <label class="toggle-row">
+        <span>Napi mérési emlékeztető</span>
+        <input type="checkbox" id="remindersOn">
+        <span class="toggle-switch"></span>
+      </label>
+      <div class="time-row">
+        <label class="field compact">
+          <span class="field-label">Reggel</span>
+          <input type="time" id="remindAM" value="07:00">
+        </label>
+        <label class="field compact">
+          <span class="field-label">Este</span>
+          <input type="time" id="remindPM" value="19:00">
+        </label>
+      </div>
+      <div class="setting-hint" id="notifStatus"></div>
+      <button class="btn ghost sm" id="testNotif">Próbaértesítés</button>
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-title">Adatok</div>
+      <div class="setting-actions">
+        <button class="btn ghost sm" id="exportJson">Export (JSON)</button>
+        <button class="btn ghost sm" id="exportCsv">Export (CSV)</button>
+        <button class="btn danger sm" id="clearAll">Összes törlése</button>
+      </div>
+    </div>
+
+    <div class="setting-group">
+      <div class="setting-title">Az alkalmazásról</div>
+      <p class="setting-text">A Tensio otthoni vérnyomás-monitorozáshoz készült. Az adatok kizárólag a készüléken tárolódnak (IndexedDB), nem kerülnek szerverre. A kategóriahatárok a 2023-as ESH irányelven alapulnak.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TOAST ============ -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
