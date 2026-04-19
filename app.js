@@ -647,7 +647,7 @@ async function showReminder(label) {
 }
 
 // ---------- Service Worker + Update handling ----------
-const CURRENT_VERSION = '1.0.0'; // az app jelenlegi verziója (ennek egyeznie kell a sw.js-beli VERSION-nel és a version.json-nal a telepítéskor)
+const CURRENT_VERSION = '1.0.1'; // az app jelenlegi verziója (a release script írja át)
 let pendingWorker = null;
 let pendingVersionInfo = null;
 

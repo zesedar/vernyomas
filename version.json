@@ -1,11 +1,8 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "released": "2026-04-19",
   "notes": [
-    "Első nyilvános verzió.",
-    "Vérnyomás rögzítése időbélyeggel, ESH 2023 szerinti kategorizálás.",
-    "7/30/90 napos trend grafikon, reggel–este összehasonlítás.",
-    "Napi kétszeri emlékeztető (reggel/este).",
-    "JSON és CSV export."
+    "Javítva: a Trend grafikon most már megjelenik (hiányzott a date-fns adapter).",
+    "A reggel/este grafikon érintetlen — korábban is működött."
   ]
 }

@@ -1,6 +1,6 @@
 // Tensio Service Worker
 // Frissítéshez: emeld a VERSION-t, és frissítsd a version.json-t is ugyanerre.
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const CACHE = `tensio-${VERSION}`;
 
 const ASSETS = [
@@ -14,6 +14,7 @@ const ASSETS = [
   './icon-512.png',
   './icon-maskable-512.png',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
+  'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js',
   'https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,600;9..144,700&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap'
 ];
 
