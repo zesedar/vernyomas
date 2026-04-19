@@ -55,13 +55,45 @@ bp-app/
 ├── index.html              # App shell, nézetek
 ├── styles.css              # Editorial-medical stílus (Fraunces + Inter Tight)
 ├── app.js                  # IndexedDB, kategorizálás, grafikonok, emlékeztetők
-├── sw.js                   # Service worker (offline cache)
+├── sw.js                   # Service worker (offline cache + update)
 ├── manifest.webmanifest    # PWA manifest
+├── version.json            # Verzió + changelog (release-nél frissítendő!)
 ├── icon.svg                # Forrás ikon
 ├── icon-192.png            # Kis ikon
 ├── icon-512.png            # Nagy ikon
 └── icon-maskable-512.png   # Android adaptív ikon
 ```
+
+## Új verzió kiadása (release-folyamat)
+
+Amikor módosítod az appot és szeretnéd, hogy a telepített user-ek kapjanak frissítés-értesítést:
+
+1. **`sw.js`** első sorában emeld a `VERSION` változót (pl. `'1.0.0'` → `'1.1.0'`)
+2. **`app.js`**-ben keresd meg a `const CURRENT_VERSION = '1.0.0'` sort, és írd át ugyanerre
+3. **`version.json`**-t frissítsd:
+   ```json
+   {
+     "version": "1.1.0",
+     "released": "2026-05-03",
+     "notes": [
+       "Új: éjszakai sötét téma",
+       "Javítva: CSV export pontosvesszővel",
+       "Finomítva: morning surge küszöb 20 Hgmm-re"
+     ]
+   }
+   ```
+4. Git commit + push a GitHubra
+
+Mit lát a user a következő app-megnyitáskor (vagy pár perc múlva, ha épp nyitva tartja):
+- Egy sötét sáv jelenik meg az app tetején: **„Új verzió érhető el — v1.0.0 → v1.1.0"** [Mi új?] [Frissítés]
+- A „Mi új?" megnyitja a changelogot (a `version.json` `notes` tömbje)
+- A „Frissítés" aktiválja az új verziót és újratölt
+
+Ha a user nem kattint, a régi verzió fut tovább — de a banner minden megnyitáskor újra megjelenik, amíg nem frissít.
+
+> **Fontos**: mind a három fájlban ugyanazt a verziószámot írd. Ha a `sw.js`-ben nem változik a `VERSION`, a service worker nem frissül, tehát nem lesz új cache — és a user nem fog értesítést kapni.
+
+## Telepítés és futtatás
 
 ## Kategóriahatárok (ESH 2023, otthoni mérésre kalibrálva)
 

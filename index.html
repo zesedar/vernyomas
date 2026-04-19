@@ -22,6 +22,21 @@
 <!-- ============ APP SHELL ============ -->
 <div class="app" id="app">
 
+  <!-- UPDATE BANNER -->
+  <div class="update-banner" id="updateBanner" role="status">
+    <div class="update-banner-icon">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#f6f1e7" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 V14 M7 9 L12 4 L17 9 M5 20 H19"/></svg>
+    </div>
+    <div class="update-banner-text">
+      <div class="update-banner-title">Új verzió érhető el</div>
+      <div class="update-banner-sub" id="updateBannerSub">v1.0.0 → v1.0.0</div>
+    </div>
+    <div class="update-banner-actions">
+      <button class="update-btn ghost" id="updateViewChanges">Mi új?</button>
+      <button class="update-btn primary" id="updateApply">Frissítés</button>
+    </div>
+  </div>
+
   <!-- NAV / HEADER -->
   <header class="topbar">
     <div class="brand">
@@ -244,6 +259,25 @@
     <div class="setting-group">
       <div class="setting-title">Az alkalmazásról</div>
       <p class="setting-text">A Tensio otthoni vérnyomás-monitorozáshoz készült. Az adatok kizárólag a készüléken tárolódnak (IndexedDB), nem kerülnek szerverre. A kategóriahatárok a 2023-as ESH irányelven alapulnak.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ CHANGELOG MODAL ============ -->
+<div class="modal" id="changelogModal" aria-hidden="true">
+  <div class="modal-backdrop" data-close-changelog></div>
+  <div class="modal-body">
+    <div class="modal-head">
+      <div class="sheet-title">Mi változott?</div>
+      <button class="icon-btn" data-close-changelog aria-label="Bezár">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6 L18 18 M18 6 L6 18"/></svg>
+      </button>
+    </div>
+    <div class="changelog-version" id="changelogVersion"></div>
+    <ul class="changelog-list" id="changelogList"></ul>
+    <div class="form-actions" style="margin-top: 24px;">
+      <button class="btn ghost" data-close-changelog>Később</button>
+      <button class="btn primary" id="changelogApply">Frissítés most</button>
     </div>
   </div>
 </div>

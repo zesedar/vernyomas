@@ -671,3 +671,101 @@ input[type=number] { -moz-appearance: textfield; }
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* ================== UPDATE BANNER ================== */
+
+.update-banner {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  margin: -18px -18px 16px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-top));
+  background: linear-gradient(180deg, #0b1220 0%, #111a2e 100%);
+  color: var(--paper);
+  display: none;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 2px 12px rgba(11,18,32,0.2);
+  animation: slideDown 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.update-banner.show { display: flex; }
+@keyframes slideDown { from { transform: translateY(-100%); } }
+
+.update-banner-icon {
+  width: 30px; height: 30px;
+  border-radius: 999px;
+  background: var(--accent);
+  display: grid; place-items: center;
+  flex-shrink: 0;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(200,67,42,0.5); }
+  50% { box-shadow: 0 0 0 8px rgba(200,67,42,0); }
+}
+.update-banner-text { flex: 1; min-width: 0; }
+.update-banner-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.update-banner-sub {
+  font-size: 11.5px;
+  color: rgba(246,241,231,0.7);
+  margin-top: 2px;
+  letter-spacing: 0.02em;
+}
+.update-banner-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.update-btn {
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.update-btn.primary {
+  background: var(--paper);
+  color: var(--ink-0);
+}
+.update-btn.ghost {
+  background: transparent;
+  border: 1px solid rgba(246,241,231,0.3);
+  color: var(--paper);
+}
+.update-btn.primary:active { background: var(--paper-2); }
+.update-btn.ghost:active { background: rgba(246,241,231,0.1); }
+
+/* Changelog modal specifics */
+.changelog-version {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-mute);
+  letter-spacing: 0.04em;
+  margin-bottom: 12px;
+}
+.changelog-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.changelog-list li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-1);
+}
+.changelog-list li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 9px;
+  width: 5px; height: 5px;
+  background: var(--accent);
+  border-radius: 999px;
+}

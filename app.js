@@ -646,11 +646,122 @@ async function showReminder(label) {
   }
 }
 
-// ---------- Service Worker ----------
+// ---------- Service Worker + Update handling ----------
+const CURRENT_VERSION = '1.0.0'; // az app jelenlegi verziója (ennek egyeznie kell a sw.js-beli VERSION-nel és a version.json-nal a telepítéskor)
+let pendingWorker = null;
+let pendingVersionInfo = null;
+
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed', err));
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('sw.js');
+
+      // Ha már most vár egy új SW (pl. újranyitáskor)
+      if (reg.waiting) {
+        pendingWorker = reg.waiting;
+        await checkAndShowUpdate();
+      }
+
+      // Ha új SW telepítődik
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', async () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            // Régi SW aktív → van új, ami vár
+            pendingWorker = nw;
+            await checkAndShowUpdate();
+          }
+        });
+      });
+
+      // Amikor a controller változik, reload
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloading) return;
+        reloading = true;
+        window.location.reload();
+      });
+
+      // 60 percenként ellenőrzés + visibility váltáskor
+      setInterval(() => reg.update().catch(()=>{}), 60 * 60 * 1000);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) reg.update().catch(()=>{});
+      });
+
+      // Időszakos version.json check (akkor is ha SW nem változott — pl. cache-ben maradt)
+      setTimeout(checkVersionJson, 2000);
+
+    } catch (err) {
+      console.warn('SW registration failed', err);
+    }
   });
+}
+
+async function checkVersionJson() {
+  try {
+    const res = await fetch('version.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    const info = await res.json();
+    if (info.version && info.version !== CURRENT_VERSION) {
+      pendingVersionInfo = info;
+      // Ha már van pending worker, mutassuk a bannert a changelog-gal
+      if (pendingWorker) showUpdateBanner();
+      // Ha nincs pending worker, akkor csak a changelog info van meg — meg fog érkezni a SW is
+    }
+  } catch {}
+}
+
+async function checkAndShowUpdate() {
+  if (!pendingVersionInfo) {
+    // Próbáljuk frissen lekérni a version.json-t
+    try {
+      const res = await fetch('version.json', { cache: 'no-store' });
+      if (res.ok) pendingVersionInfo = await res.json();
+    } catch {}
+  }
+  showUpdateBanner();
+}
+
+function showUpdateBanner() {
+  const banner = $('#updateBanner');
+  const sub = $('#updateBannerSub');
+  if (pendingVersionInfo?.version) {
+    sub.textContent = `v${CURRENT_VERSION} → v${pendingVersionInfo.version}`;
+  } else {
+    sub.textContent = 'Koppints a frissítéshez';
+  }
+  banner.classList.add('show');
+}
+
+$('#updateApply').addEventListener('click', applyUpdate);
+$('#changelogApply').addEventListener('click', applyUpdate);
+$('#updateViewChanges').addEventListener('click', showChangelog);
+$$('[data-close-changelog]').forEach(el => el.addEventListener('click', () => {
+  $('#changelogModal').classList.remove('open');
+}));
+
+function showChangelog() {
+  const v = pendingVersionInfo;
+  if (!v) { toast('Nincs részletes információ'); return; }
+  $('#changelogVersion').textContent = `v${v.version}${v.released ? ' · ' + v.released : ''}`;
+  const list = $('#changelogList');
+  list.innerHTML = (v.notes || ['Részletek nem elérhetők.']).map(n => `<li>${escapeHtml(n)}</li>`).join('');
+  $('#changelogModal').classList.add('open');
+}
+
+function applyUpdate() {
+  if (!pendingWorker) {
+    // Fallback: egyszerű reload, hátha megold mindent
+    window.location.reload();
+    return;
+  }
+  pendingWorker.postMessage('SKIP_WAITING');
+  // A controllerchange listener fogja újratölteni
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }
 
 // ---------- Boot ----------
