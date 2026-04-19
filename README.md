@@ -57,7 +57,9 @@ bp-app/
 ├── app.js                  # IndexedDB, kategorizálás, grafikonok, emlékeztetők
 ├── sw.js                   # Service worker (offline cache + update)
 ├── manifest.webmanifest    # PWA manifest
-├── version.json            # Verzió + changelog (release-nél frissítendő!)
+├── version.json            # Verzió + changelog
+├── release.bat             # ← Dupla kattintás új verzió kiadásához
+├── release-tool.ps1        # A release ablak (PowerShell)
 ├── icon.svg                # Forrás ikon
 ├── icon-192.png            # Kis ikon
 ├── icon-512.png            # Nagy ikon
@@ -66,32 +68,35 @@ bp-app/
 
 ## Új verzió kiadása (release-folyamat)
 
-Amikor módosítod az appot és szeretnéd, hogy a telepített user-ek kapjanak frissítés-értesítést:
+**Dupla kattintás a `release.bat` fájlra.** Megnyílik egy ablak, amiben:
 
-1. **`sw.js`** első sorában emeld a `VERSION` változót (pl. `'1.0.0'` → `'1.1.0'`)
-2. **`app.js`**-ben keresd meg a `const CURRENT_VERSION = '1.0.0'` sort, és írd át ugyanerre
-3. **`version.json`**-t frissítsd:
-   ```json
-   {
-     "version": "1.1.0",
-     "released": "2026-05-03",
-     "notes": [
-       "Új: éjszakai sötét téma",
-       "Javítva: CSV export pontosvesszővel",
-       "Finomítva: morning surge küszöb 20 Hgmm-re"
-     ]
-   }
+1. Látod, mi a jelenlegi verzió (pl. `v1.0.0`)
+2. Megadod az új verziót (alapból patch+1-et javasol, pl. `1.0.1` — átírhatod pl. `1.1.0`-ra)
+3. Beírod a változásokat — egy sor = egy pont a „Mi változott?" listában:
    ```
-4. Git commit + push a GitHubra
+   Új: sötét téma
+   Javítva: CSV export pontosvesszővel
+   Finomítva: morning surge küszöb 20 Hgmm-re
+   ```
+4. „Kiadás" gomb
 
-Mit lát a user a következő app-megnyitáskor (vagy pár perc múlva, ha épp nyitva tartja):
-- Egy sötét sáv jelenik meg az app tetején: **„Új verzió érhető el — v1.0.0 → v1.1.0"** [Mi új?] [Frissítés]
-- A „Mi új?" megnyitja a changelogot (a `version.json` `notes` tömbje)
-- A „Frissítés" aktiválja az új verziót és újratölt
+A program automatikusan frissíti mindhárom érintett fájlt (`version.json`, `sw.js`, `app.js`).
 
-Ha a user nem kattint, a régi verzió fut tovább — de a banner minden megnyitáskor újra megjelenik, amíg nem frissít.
+Utána már csak:
+```bash
+git add -A && git commit -m "Release v1.1.0" && git push
+```
 
-> **Fontos**: mind a három fájlban ugyanazt a verziószámot írd. Ha a `sw.js`-ben nem változik a `VERSION`, a service worker nem frissül, tehát nem lesz új cache — és a user nem fog értesítést kapni.
+**Semmi telepítés nem kell** — a release-tool tiszta Windows PowerShellt használ, ami alapból ott van minden Windows 10/11 gépen.
+
+### Mit lát a user?
+
+Amikor az új verzió kint van, a telepített appban a következő megnyitáskor (vagy óránként háttérben) megjelenik egy sötét sáv az app tetején: **„Új verzió érhető el — v1.0.0 → v1.1.0"** [Mi új?] [Frissítés].
+
+- A **„Mi új?"** megnyit egy modalt a változáslistával
+- A **„Frissítés"** aktiválja az új verziót és újratölti az appot
+
+Ha a user nem kattint, a régi verzió fut tovább — de a banner minden megnyitáskor megjelenik, amíg nem frissít.
 
 ## Telepítés és futtatás
 
