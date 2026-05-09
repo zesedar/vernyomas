@@ -16,6 +16,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,600;9..144,700&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/pdfmake.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/vfs_fonts.js"></script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -253,6 +255,7 @@
       <div class="setting-actions">
         <button class="btn ghost sm" id="exportJson">Export (JSON)</button>
         <button class="btn ghost sm" id="exportCsv">Export (CSV)</button>
+        <button class="btn ghost sm" id="exportPdf">Export (PDF)</button>
         <button class="btn danger sm" id="clearAll">Összes törlése</button>
       </div>
     </div>

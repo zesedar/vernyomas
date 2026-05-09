@@ -573,6 +573,7 @@ $('#exportJson').addEventListener('click', async () => {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   download(blob, `tensio-export-${todayStr()}.json`);
 });
+
 $('#exportCsv').addEventListener('click', async () => {
   const data = await dbAll();
   // Excel Android gyakran dátumként kezeli az első oszlopot,
@@ -586,6 +587,426 @@ $('#exportCsv').addEventListener('click', async () => {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   download(blob, `tensio-export-${todayStr()}.csv`);
 });
+
+$('#exportPdf').addEventListener('click', exportPdf);
+
+async function exportPdf() {
+  if (!window.pdfMake) {
+    toast('A PDF export könyvtár nem töltődött be. Ellenőrizd az internetkapcsolatot.');
+    return;
+  }
+
+  const data = (await dbAll()).sort((a, b) => a.ts - b.ts);
+  if (!data.length) {
+    toast('Nincs exportálható mérés');
+    return;
+  }
+
+  toast('PDF készítése...');
+  try {
+    const stats = buildPdfStats(data);
+    const [trendImg, dailyAvgImg, amPmImg] = await Promise.all([
+      createTrendChartImage(data),
+      createDailyAverageChartImage(data),
+      createAmPmChartImage(data),
+    ]);
+
+    const docDefinition = buildPdfDocument(data, stats, { trendImg, dailyAvgImg, amPmImg });
+    pdfMake.createPdf(docDefinition).download(`tensio-jelentes-${todayStr()}.pdf`);
+    toast('PDF export elindult');
+  } catch (err) {
+    console.error('PDF export failed', err);
+    toast('PDF export sikertelen');
+  }
+}
+
+function buildPdfStats(data) {
+  const sorted = [...data].sort((a, b) => a.ts - b.ts);
+  const ranges = [
+    { label: 'Összes mérés', readings: sorted },
+    { label: 'Utolsó 7 nap', readings: sorted.filter(r => withinDays(r.ts, 7)) },
+    { label: 'Utolsó 30 nap', readings: sorted.filter(r => withinDays(r.ts, 30)) },
+    { label: 'Utolsó 90 nap', readings: sorted.filter(r => withinDays(r.ts, 90)) },
+  ];
+
+  const allAvg = summarizeReadings(sorted);
+  const latest = sorted[sorted.length - 1];
+  return {
+    firstTs: sorted[0].ts,
+    lastTs: latest.ts,
+    latest,
+    allAvg,
+    category: allAvg ? classify(allAvg.sys, allAvg.dia) : null,
+    summaryRows: ranges.map(r => ({ label: r.label, ...summarizeReadings(r.readings) })),
+    amPmRows: buildAmPmRows(sorted),
+  };
+}
+
+function summarizeReadings(readings) {
+  if (!readings.length) {
+    return { count: 0, sys: null, dia: null, pulse: null, pp: null, map: null, minSys: null, maxSys: null, minDia: null, maxDia: null };
+  }
+  return {
+    count: readings.length,
+    sys: round(mean(readings.map(r => r.sys))),
+    dia: round(mean(readings.map(r => r.dia))),
+    pulse: round(mean(readings.map(r => r.pulse))),
+    pp: round(mean(readings.map(r => r.sys - r.dia))),
+    map: round(mean(readings.map(r => r.dia + (r.sys - r.dia) / 3))),
+    minSys: Math.min(...readings.map(r => r.sys)),
+    maxSys: Math.max(...readings.map(r => r.sys)),
+    minDia: Math.min(...readings.map(r => r.dia)),
+    maxDia: Math.max(...readings.map(r => r.dia)),
+  };
+}
+
+function buildAmPmRows(readings) {
+  const groups = [
+    { label: 'Reggel (04:00-11:59)', readings: readings.filter(r => { const h = new Date(r.ts).getHours(); return h >= 4 && h < 12; }) },
+    { label: 'Napközben (12:00-16:59)', readings: readings.filter(r => { const h = new Date(r.ts).getHours(); return h >= 12 && h < 17; }) },
+    { label: 'Este (17:00-23:59)', readings: readings.filter(r => { const h = new Date(r.ts).getHours(); return h >= 17 && h < 24; }) },
+    { label: 'Éjszaka (00:00-03:59)', readings: readings.filter(r => { const h = new Date(r.ts).getHours(); return h >= 0 && h < 4; }) },
+  ];
+  return groups.map(g => ({ label: g.label, ...summarizeReadings(g.readings) }));
+}
+
+function dash(v, suffix = '') {
+  return v === null || v === undefined || Number.isNaN(v) ? '—' : `${v}${suffix}`;
+}
+
+function fmtPdfDateTime(ts) {
+  const d = new Date(ts);
+  return d.toLocaleString('hu-HU', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+function fmtPdfPeriod(firstTs, lastTs) {
+  return `${fmtDateHu(firstTs)} - ${fmtDateHu(lastTs)}`;
+}
+
+function buildPdfDocument(data, stats, images) {
+  const generatedAt = new Date().toLocaleString('hu-HU', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+  const latestClass = classify(stats.latest.sys, stats.latest.dia);
+  const avgText = stats.allAvg
+    ? `${stats.allAvg.sys}/${stats.allAvg.dia} Hgmm, átlag pulzus ${stats.allAvg.pulse}/perc, pulzusnyomás ${stats.allAvg.pp} Hgmm, MAP ${stats.allAvg.map} Hgmm.`
+    : 'Nincs elég adat.';
+
+  return {
+    pageSize: 'A4',
+    pageMargins: [34, 44, 34, 44],
+    info: {
+      title: 'Tensio vérnyomás jelentés',
+      author: 'Tensio',
+      subject: 'Vérnyomás mérések, átlagok és grafikonok',
+    },
+    defaultStyle: { font: 'Roboto', fontSize: 9, color: '#0b1220' },
+    footer: (currentPage, pageCount) => ({
+      text: `Tensio vérnyomás jelentés · ${currentPage}/${pageCount}`,
+      alignment: 'center',
+      fontSize: 8,
+      color: '#8892a6',
+      margin: [0, 10, 0, 0]
+    }),
+    styles: {
+      h1: { fontSize: 22, bold: true, margin: [0, 0, 0, 4] },
+      h2: { fontSize: 14, bold: true, margin: [0, 18, 0, 8] },
+      h3: { fontSize: 11, bold: true, margin: [0, 10, 0, 5] },
+      meta: { fontSize: 9, color: '#5c6479' },
+      muted: { fontSize: 8, color: '#5c6479' },
+      tableHeader: { bold: true, fillColor: '#f1f3f6', color: '#0b1220' },
+      smallTable: { fontSize: 8 },
+    },
+    content: [
+      {
+        columns: [
+          {
+            width: '*',
+            stack: [
+              { text: 'Tensio vérnyomás jelentés', style: 'h1' },
+              { text: `Készült: ${generatedAt}` , style: 'meta' },
+              { text: `Időszak: ${fmtPdfPeriod(stats.firstTs, stats.lastTs)} · ${data.length} mérés`, style: 'meta' },
+            ]
+          },
+          {
+            width: 170,
+            text: 'Tájékoztató jellegű napló. Nem helyettesíti az orvosi vizsgálatot vagy diagnózist.',
+            alignment: 'right',
+            style: 'muted'
+          }
+        ]
+      },
+      { canvas: [{ type: 'line', x1: 0, y1: 12, x2: 527, y2: 12, lineWidth: 0.7, lineColor: '#e3e7ee' }], margin: [0, 0, 0, 12] },
+
+      { text: 'Összefoglaló', style: 'h2' },
+      {
+        table: {
+          headerRows: 1,
+          widths: ['*', 42, 52, 52, 45, 55, 42],
+          body: [
+            [
+              { text: 'Időszak', style: 'tableHeader' },
+              { text: 'Mérés', style: 'tableHeader' },
+              { text: 'Sziszt.', style: 'tableHeader' },
+              { text: 'Diaszt.', style: 'tableHeader' },
+              { text: 'Pulzus', style: 'tableHeader' },
+              { text: 'Pulzusny.', style: 'tableHeader' },
+              { text: 'MAP', style: 'tableHeader' },
+            ],
+            ...stats.summaryRows.map(row => [
+              row.label,
+              String(row.count),
+              dash(row.sys, ' Hgmm'),
+              dash(row.dia, ' Hgmm'),
+              dash(row.pulse, '/perc'),
+              dash(row.pp, ' Hgmm'),
+              dash(row.map, ' Hgmm'),
+            ])
+          ]
+        },
+        layout: 'lightHorizontalLines'
+      },
+      {
+        columns: [
+          {
+            width: '*',
+            stack: [
+              { text: 'Teljes időszak átlaga', style: 'h3' },
+              { text: avgText },
+              { text: `Átlag alapján: ${stats.category.label}. ${stats.category.desc}`, margin: [0, 4, 0, 0] },
+            ]
+          },
+          {
+            width: 185,
+            stack: [
+              { text: 'Legutóbbi mérés', style: 'h3' },
+              { text: `${stats.latest.sys}/${stats.latest.dia} Hgmm · pulzus ${stats.latest.pulse}/perc` },
+              { text: `${fmtPdfDateTime(stats.latest.ts)} · ${latestClass.label}`, style: 'muted', margin: [0, 4, 0, 0] },
+            ]
+          }
+        ],
+        columnGap: 18,
+        margin: [0, 8, 0, 0]
+      },
+
+      { text: 'Napszak szerinti átlagok', style: 'h2' },
+      {
+        table: {
+          headerRows: 1,
+          widths: ['*', 42, 55, 55, 45, 55, 42],
+          body: [
+            [
+              { text: 'Napszak', style: 'tableHeader' },
+              { text: 'Mérés', style: 'tableHeader' },
+              { text: 'Sziszt.', style: 'tableHeader' },
+              { text: 'Diaszt.', style: 'tableHeader' },
+              { text: 'Pulzus', style: 'tableHeader' },
+              { text: 'Pulzusny.', style: 'tableHeader' },
+              { text: 'MAP', style: 'tableHeader' },
+            ],
+            ...stats.amPmRows.map(row => [
+              row.label,
+              String(row.count),
+              dash(row.sys, ' Hgmm'),
+              dash(row.dia, ' Hgmm'),
+              dash(row.pulse, '/perc'),
+              dash(row.pp, ' Hgmm'),
+              dash(row.map, ' Hgmm'),
+            ])
+          ]
+        },
+        layout: 'lightHorizontalLines'
+      },
+
+      { text: 'Grafikonok', style: 'h2' },
+      { text: 'Szisztolés és diasztolés trend - összes mérés', style: 'h3' },
+      { image: images.trendImg, width: 520, margin: [0, 0, 0, 8] },
+      { text: 'Napi átlagok - származtatott értékek', style: 'h3' },
+      { image: images.dailyAvgImg, width: 520, margin: [0, 0, 0, 8] },
+      { text: 'Napszak szerinti átlag - összes mérés', style: 'h3' },
+      { image: images.amPmImg, width: 440, alignment: 'center', margin: [0, 0, 0, 6] },
+
+      { text: 'Összes mérés', style: 'h2', pageBreak: 'before' },
+      {
+        table: {
+          headerRows: 1,
+          widths: [90, 48, 48, 42, 38, 38, '*'],
+          body: [
+            [
+              { text: 'Dátum / idő', style: 'tableHeader' },
+              { text: 'Sziszt.', style: 'tableHeader' },
+              { text: 'Diaszt.', style: 'tableHeader' },
+              { text: 'Pulzus', style: 'tableHeader' },
+              { text: 'PP', style: 'tableHeader' },
+              { text: 'MAP', style: 'tableHeader' },
+              { text: 'Kategória', style: 'tableHeader' },
+            ],
+            ...[...data].sort((a, b) => b.ts - a.ts).map(r => {
+              const pp = r.sys - r.dia;
+              const map = round(r.dia + pp / 3);
+              const c = classify(r.sys, r.dia);
+              return [
+                fmtPdfDateTime(r.ts),
+                `${r.sys} Hgmm`,
+                `${r.dia} Hgmm`,
+                `${r.pulse}/perc`,
+                String(pp),
+                String(map),
+                c.label,
+              ];
+            })
+          ]
+        },
+        layout: 'lightHorizontalLines',
+        style: 'smallTable'
+      }
+    ]
+  };
+}
+
+function groupDailyAverages(readings) {
+  const groups = new Map();
+  for (const r of readings) {
+    const d = new Date(r.ts);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  return [...groups.entries()].map(([key, rows]) => ({
+    key,
+    label: fmtDateHu(rows[0].ts),
+    count: rows.length,
+    sys: round(mean(rows.map(r => r.sys))),
+    dia: round(mean(rows.map(r => r.dia))),
+    pulse: round(mean(rows.map(r => r.pulse))),
+  })).sort((a, b) => a.key.localeCompare(b.key));
+}
+
+async function renderChartImage(config, width = 980, height = 460) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const chart = new Chart(canvas.getContext('2d'), config);
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  const image = canvas.toDataURL('image/png', 1.0);
+  chart.destroy();
+  return image;
+}
+
+function basePdfChartOptions(title = '') {
+  return {
+    responsive: false,
+    animation: false,
+    plugins: {
+      title: { display: !!title, text: title, font: { size: 16, weight: 'bold' }, color: '#0b1220', padding: { bottom: 14 } },
+      legend: { position: 'bottom', labels: { color: '#5c6479', boxWidth: 12, padding: 14 } },
+    },
+    scales: {
+      x: { grid: { color: 'rgba(11,18,32,0.04)' }, ticks: { color: '#5c6479', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+      y: { beginAtZero: false, grid: { color: 'rgba(11,18,32,0.08)' }, ticks: { color: '#5c6479' } }
+    }
+  };
+}
+
+function createTrendChartImage(readings) {
+  const rows = [...readings].sort((a, b) => a.ts - b.ts);
+  return renderChartImage({
+    type: 'line',
+    data: {
+      labels: rows.map(r => fmtDateHu(r.ts)),
+      datasets: [
+        {
+          label: 'Szisztolés',
+          data: rows.map(r => r.sys),
+          borderColor: '#0b1220',
+          backgroundColor: 'rgba(11,18,32,0.06)',
+          borderWidth: 2,
+          pointRadius: rows.length > 80 ? 0 : 2,
+          tension: 0.25,
+        },
+        {
+          label: 'Diasztolés',
+          data: rows.map(r => r.dia),
+          borderColor: '#c8432a',
+          backgroundColor: 'rgba(200,67,42,0.06)',
+          borderWidth: 2,
+          pointRadius: rows.length > 80 ? 0 : 2,
+          tension: 0.25,
+        }
+      ]
+    },
+    options: basePdfChartOptions('Trend - összes mérés')
+  });
+}
+
+function createDailyAverageChartImage(readings) {
+  const days = groupDailyAverages(readings);
+  return renderChartImage({
+    type: 'line',
+    data: {
+      labels: days.map(d => d.label),
+      datasets: [
+        {
+          label: 'Napi szisztolés átlag',
+          data: days.map(d => d.sys),
+          borderColor: '#0b1220',
+          backgroundColor: 'rgba(11,18,32,0.06)',
+          borderWidth: 2,
+          pointRadius: days.length > 80 ? 0 : 2,
+          tension: 0.25,
+        },
+        {
+          label: 'Napi diasztolés átlag',
+          data: days.map(d => d.dia),
+          borderColor: '#c8432a',
+          backgroundColor: 'rgba(200,67,42,0.06)',
+          borderWidth: 2,
+          pointRadius: days.length > 80 ? 0 : 2,
+          tension: 0.25,
+        },
+        {
+          label: 'Napi pulzus átlag',
+          data: days.map(d => d.pulse),
+          borderColor: '#5c6479',
+          backgroundColor: 'rgba(92,100,121,0.06)',
+          borderWidth: 1.8,
+          pointRadius: days.length > 80 ? 0 : 2,
+          tension: 0.25,
+        }
+      ]
+    },
+    options: basePdfChartOptions('Napi átlagok')
+  });
+}
+
+function createAmPmChartImage(readings) {
+  const rows = buildAmPmRows(readings);
+  return renderChartImage({
+    type: 'bar',
+    data: {
+      labels: rows.map(r => r.label.replace(/ \(.+\)/, '')),
+      datasets: [
+        {
+          label: 'Szisztolés átlag',
+          data: rows.map(r => r.sys || 0),
+          backgroundColor: '#0b1220',
+          borderRadius: 4,
+        },
+        {
+          label: 'Diasztolés átlag',
+          data: rows.map(r => r.dia || 0),
+          backgroundColor: '#c8432a',
+          borderRadius: 4,
+        }
+      ]
+    },
+    options: {
+      ...basePdfChartOptions('Napszak szerinti átlagok'),
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#5c6479' } },
+        y: { beginAtZero: true, grid: { color: 'rgba(11,18,32,0.08)' }, ticks: { color: '#5c6479' } }
+      }
+    }
+  }, 880, 420);
+}
 $('#clearAll').addEventListener('click', async () => {
   if (!confirm('Biztosan törlöd az ÖSSZES bejegyzést? Ez nem visszavonható.')) return;
   await dbClear();
