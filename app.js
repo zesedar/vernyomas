@@ -118,6 +118,15 @@ function fmtDateTimeShort(ts) {
   if (isYest) return `Tegnap · ${fmtTime(ts)}`;
   return `${fmtDateHu(ts)} · ${fmtTime(ts)}`;
 }
+function fmtCsvDateTime(ts) {
+  const d = new Date(ts);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hour = String(d.getHours()).padStart(2, '0');
+  const minute = String(d.getMinutes()).padStart(2, '0');
+  return `${year}.${month}.${day}. ${hour}:${minute}`;
+}
 
 function withinDays(ts, days) {
   return ts >= Date.now() - days * 86400000;
@@ -568,7 +577,7 @@ $('#exportCsv').addEventListener('click', async () => {
   const data = await dbAll();
   let csv = 'idopont;szisztoles;diasztoles;pulzus\n';
   for (const r of data) {
-    const d = new Date(r.ts).toISOString();
+    const d = fmtCsvDateTime(r.ts);
     csv += `${d};${r.sys};${r.dia};${r.pulse}\n`;
   }
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -647,7 +656,7 @@ async function showReminder(label) {
 }
 
 // ---------- Service Worker + Update handling ----------
-const CURRENT_VERSION = '1.0.1'; // az app jelenlegi verziója (a release script írja át)
+const CURRENT_VERSION = '1.0.2'; // az app jelenlegi verziója (a release script írja át)
 let pendingWorker = null;
 let pendingVersionInfo = null;
 

@@ -1,8 +1,7 @@
 {
-  "version": "1.0.1",
-  "released": "2026-04-19",
-  "notes": [
-    "Javítva: a Trend grafikon most már megjelenik (hiányzott a date-fns adapter).",
-    "A reggel/este grafikon érintetlen — korábban is működött."
-  ]
+    "version":  "1.0.2",
+    "released":  "2026-05-09",
+    "notes":  [
+                  "Javítva a csv exportnál a fölösleges karakterek a dátum mezőben."
+              ]
 }
