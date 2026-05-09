@@ -1,7 +1,7 @@
 {
-    "version":  "1.0.6",
+    "version":  "1.0.7",
     "released":  "2026-05-09",
     "notes":  [
-                  "feat: személyek is hozzá adhatóak."
+                  "fix: profil választó gomb"
               ]
 }
