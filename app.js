@@ -305,9 +305,12 @@ function drawTrendChart(all, days) {
           borderColor: '#0b1220',
           backgroundColor: 'rgba(11,18,32,0.06)',
           tension: 0.3,
-          borderWidth: 2,
+          borderWidth: 2.4,
           pointRadius: 3,
-          pointBackgroundColor: '#0b1220',
+          pointStyle: 'circle',
+          pointBackgroundColor: '#ffffff',
+          pointBorderColor: '#0b1220',
+          pointBorderWidth: 1.4,
           pointHoverRadius: 5,
         },
         {
@@ -316,9 +319,13 @@ function drawTrendChart(all, days) {
           borderColor: '#c8432a',
           backgroundColor: 'rgba(200,67,42,0.06)',
           tension: 0.3,
-          borderWidth: 2,
-          pointRadius: 3,
-          pointBackgroundColor: '#c8432a',
+          borderWidth: 2.4,
+          borderDash: [9, 6],
+          pointRadius: 3.5,
+          pointStyle: 'triangle',
+          pointBackgroundColor: '#ffffff',
+          pointBorderColor: '#c8432a',
+          pointBorderWidth: 1.4,
           pointHoverRadius: 5,
         }
       ]
@@ -334,7 +341,6 @@ function drawTrendChart(all, days) {
             font: { family: 'Inter Tight', size: 11, weight: '600' },
             color: '#5c6479',
             usePointStyle: true,
-            pointStyle: 'circle',
             padding: 14,
           }
         },
@@ -413,6 +419,7 @@ function drawAmPmChart(all) {
   const pmDia = evening.length ? round(mean(evening.map(r=>r.dia))) : 0;
 
   const ctx = $('#amPmChart').getContext('2d');
+  const eveningPattern = makePrintPattern('diagonal');
   if (amPmChart) amPmChart.destroy();
 
   amPmChart = new Chart(ctx, {
@@ -424,13 +431,17 @@ function drawAmPmChart(all) {
           label: `Reggel (${morning.length})`,
           data: [amSys, amDia],
           backgroundColor: '#0b1220',
+          borderColor: '#0b1220',
+          borderWidth: 1.2,
           borderRadius: 4,
           barThickness: 28,
         },
         {
           label: `Este (${evening.length})`,
           data: [pmSys, pmDia],
-          backgroundColor: '#c8432a',
+          backgroundColor: eveningPattern || '#c8432a',
+          borderColor: '#c8432a',
+          borderWidth: 1.2,
           borderRadius: 4,
           barThickness: 28,
         }
@@ -817,6 +828,7 @@ function buildPdfDocument(data, stats, images) {
       },
 
       { text: 'Grafikonok', style: 'h2' },
+      { text: 'Nyomtatási jelmagyarázat: a vonalak nem csak színnel, hanem vonalmintával és pontformával is különböznek. Szisztolés = folytonos vonal/kör, diasztolés = szaggatott vonal/háromszög, pulzus = pontozott vonal/rombusz. Az oszlopdiagramnál a sraffozott oszlop a diasztolés értéket jelöli.', style: 'muted', margin: [0, 0, 0, 8] },
       { text: 'Szisztolés és diasztolés trend - összes mérés', style: 'h3' },
       { image: images.trendImg, width: 520, margin: [0, 0, 0, 8] },
       { text: 'Napi átlagok - származtatott értékek', style: 'h3' },
@@ -891,118 +903,266 @@ async function renderChartImage(config, width = 980, height = 460) {
   return image;
 }
 
-function basePdfChartOptions(title = '') {
+function makePrintPattern(kind) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 12;
+  canvas.height = 12;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#0b1220';
+  ctx.lineWidth = 1.7;
+
+  if (kind === 'diagonal') {
+    ctx.beginPath();
+    ctx.moveTo(-3, 12);
+    ctx.lineTo(12, -3);
+    ctx.moveTo(3, 15);
+    ctx.lineTo(15, 3);
+    ctx.stroke();
+  } else if (kind === 'cross') {
+    ctx.beginPath();
+    ctx.moveTo(0, 3);
+    ctx.lineTo(12, 3);
+    ctx.moveTo(0, 9);
+    ctx.lineTo(12, 9);
+    ctx.moveTo(3, 0);
+    ctx.lineTo(3, 12);
+    ctx.moveTo(9, 0);
+    ctx.lineTo(9, 12);
+    ctx.stroke();
+  }
+
+  return ctx.createPattern(canvas, 'repeat');
+}
+
+const pdfDirectLabelPlugin = {
+  id: 'pdfDirectLabelPlugin',
+  afterDatasetsDraw(chart, args, pluginOptions) {
+    const ctx = chart.ctx;
+    const labels = pluginOptions?.labels || {};
+    ctx.save();
+    ctx.font = 'bold 13px Arial, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#0b1220';
+
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      const meta = chart.getDatasetMeta(datasetIndex);
+      if (!meta?.data?.length || meta.hidden) return;
+      const point = [...meta.data].reverse().find(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+      if (!point) return;
+      const label = labels[dataset.label] || dataset.label;
+      const dash = dataset.borderDash || [];
+      const markerX = point.x + 12;
+      const textX = point.x + 36;
+      const y = point.y;
+
+      ctx.beginPath();
+      ctx.setLineDash(dash);
+      ctx.lineWidth = dataset.borderWidth || 2;
+      ctx.strokeStyle = '#0b1220';
+      ctx.moveTo(markerX, y);
+      ctx.lineTo(markerX + 18, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.beginPath();
+      if (dataset.pointStyle === 'triangle') {
+        ctx.moveTo(markerX + 9, y - 6);
+        ctx.lineTo(markerX + 15, y + 6);
+        ctx.lineTo(markerX + 3, y + 6);
+        ctx.closePath();
+      } else if (dataset.pointStyle === 'rectRot') {
+        ctx.save();
+        ctx.translate(markerX + 9, y);
+        ctx.rotate(Math.PI / 4);
+        ctx.rect(-4.5, -4.5, 9, 9);
+        ctx.restore();
+      } else {
+        ctx.arc(markerX + 9, y, 5, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = '#0b1220';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+      ctx.fillStyle = '#0b1220';
+      ctx.fillText(label, textX, y);
+    });
+
+    ctx.restore();
+  }
+};
+
+function basePdfChartOptions(title = '', opts = {}) {
+  const rightPadding = opts.directLabels ? 150 : 16;
   return {
     responsive: false,
     animation: false,
+    layout: { padding: { top: 6, right: rightPadding, bottom: 4, left: 8 } },
     plugins: {
       title: { display: !!title, text: title, font: { size: 16, weight: 'bold' }, color: '#0b1220', padding: { bottom: 14 } },
-      legend: { position: 'bottom', labels: { color: '#5c6479', boxWidth: 12, padding: 14 } },
+      legend: {
+        position: 'bottom',
+        labels: {
+          color: '#0b1220',
+          boxWidth: 34,
+          boxHeight: 10,
+          padding: 16,
+          font: { size: 12, weight: 'bold' },
+        }
+      },
+      pdfDirectLabelPlugin: opts.directLabels ? { labels: opts.directLabels } : false,
     },
     scales: {
-      x: { grid: { color: 'rgba(11,18,32,0.04)' }, ticks: { color: '#5c6479', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
-      y: { beginAtZero: false, grid: { color: 'rgba(11,18,32,0.08)' }, ticks: { color: '#5c6479' } }
+      x: { grid: { color: 'rgba(11,18,32,0.10)' }, ticks: { color: '#0b1220', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+      y: { beginAtZero: false, grid: { color: 'rgba(11,18,32,0.18)' }, ticks: { color: '#0b1220' } }
     }
   };
 }
 
 function createTrendChartImage(readings) {
   const rows = [...readings].sort((a, b) => a.ts - b.ts);
+  const hidePoints = rows.length > 80;
   return renderChartImage({
     type: 'line',
+    plugins: [pdfDirectLabelPlugin],
     data: {
       labels: rows.map(r => fmtDateHu(r.ts)),
       datasets: [
         {
-          label: 'Szisztolés',
+          label: 'Szisztolés - folytonos vonal / kör',
           data: rows.map(r => r.sys),
           borderColor: '#0b1220',
           backgroundColor: 'rgba(11,18,32,0.06)',
-          borderWidth: 2,
-          pointRadius: rows.length > 80 ? 0 : 2,
+          borderWidth: 3,
+          pointRadius: hidePoints ? 0 : 3.2,
+          pointHoverRadius: 4,
+          pointStyle: 'circle',
+          pointBackgroundColor: '#ffffff',
+          pointBorderColor: '#0b1220',
+          pointBorderWidth: 1.6,
           tension: 0.25,
         },
         {
-          label: 'Diasztolés',
+          label: 'Diasztolés - szaggatott vonal / háromszög',
           data: rows.map(r => r.dia),
-          borderColor: '#c8432a',
-          backgroundColor: 'rgba(200,67,42,0.06)',
-          borderWidth: 2,
-          pointRadius: rows.length > 80 ? 0 : 2,
+          borderColor: '#0b1220',
+          backgroundColor: 'rgba(11,18,32,0.02)',
+          borderWidth: 3,
+          borderDash: [12, 7],
+          pointRadius: hidePoints ? 0 : 4,
+          pointHoverRadius: 5,
+          pointStyle: 'triangle',
+          pointBackgroundColor: '#ffffff',
+          pointBorderColor: '#0b1220',
+          pointBorderWidth: 1.6,
           tension: 0.25,
         }
       ]
     },
-    options: basePdfChartOptions('Trend - összes mérés')
+    options: basePdfChartOptions('Trend - összes mérés', {
+      directLabels: {
+        'Szisztolés - folytonos vonal / kör': 'Szisztolés',
+        'Diasztolés - szaggatott vonal / háromszög': 'Diasztolés',
+      }
+    })
   });
 }
 
 function createDailyAverageChartImage(readings) {
   const days = groupDailyAverages(readings);
+  const hidePoints = days.length > 80;
   return renderChartImage({
     type: 'line',
+    plugins: [pdfDirectLabelPlugin],
     data: {
       labels: days.map(d => d.label),
       datasets: [
         {
-          label: 'Napi szisztolés átlag',
+          label: 'Napi szisztolés átlag - folytonos vonal / kör',
           data: days.map(d => d.sys),
           borderColor: '#0b1220',
           backgroundColor: 'rgba(11,18,32,0.06)',
-          borderWidth: 2,
-          pointRadius: days.length > 80 ? 0 : 2,
+          borderWidth: 3,
+          pointRadius: hidePoints ? 0 : 3.2,
+          pointStyle: 'circle',
+          pointBackgroundColor: '#ffffff',
+          pointBorderColor: '#0b1220',
+          pointBorderWidth: 1.6,
           tension: 0.25,
         },
         {
-          label: 'Napi diasztolés átlag',
+          label: 'Napi diasztolés átlag - szaggatott vonal / háromszög',
           data: days.map(d => d.dia),
-          borderColor: '#c8432a',
-          backgroundColor: 'rgba(200,67,42,0.06)',
-          borderWidth: 2,
-          pointRadius: days.length > 80 ? 0 : 2,
+          borderColor: '#0b1220',
+          backgroundColor: 'rgba(11,18,32,0.02)',
+          borderWidth: 3,
+          borderDash: [12, 7],
+          pointRadius: hidePoints ? 0 : 4,
+          pointStyle: 'triangle',
+          pointBackgroundColor: '#ffffff',
+          pointBorderColor: '#0b1220',
+          pointBorderWidth: 1.6,
           tension: 0.25,
         },
         {
-          label: 'Napi pulzus átlag',
+          label: 'Napi pulzus átlag - pontozott vonal / rombusz',
           data: days.map(d => d.pulse),
-          borderColor: '#5c6479',
-          backgroundColor: 'rgba(92,100,121,0.06)',
-          borderWidth: 1.8,
-          pointRadius: days.length > 80 ? 0 : 2,
+          borderColor: '#0b1220',
+          backgroundColor: 'rgba(11,18,32,0.02)',
+          borderWidth: 2.6,
+          borderDash: [2, 6],
+          pointRadius: hidePoints ? 0 : 3.5,
+          pointStyle: 'rectRot',
+          pointBackgroundColor: '#ffffff',
+          pointBorderColor: '#0b1220',
+          pointBorderWidth: 1.6,
           tension: 0.25,
         }
       ]
     },
-    options: basePdfChartOptions('Napi átlagok')
+    options: basePdfChartOptions('Napi átlagok', {
+      directLabels: {
+        'Napi szisztolés átlag - folytonos vonal / kör': 'Sziszt. átlag',
+        'Napi diasztolés átlag - szaggatott vonal / háromszög': 'Diaszt. átlag',
+        'Napi pulzus átlag - pontozott vonal / rombusz': 'Pulzus átlag',
+      }
+    })
   });
 }
 
 function createAmPmChartImage(readings) {
   const rows = buildAmPmRows(readings);
+  const diagonalPattern = makePrintPattern('diagonal');
   return renderChartImage({
     type: 'bar',
     data: {
       labels: rows.map(r => r.label.replace(/ \(.+\)/, '')),
       datasets: [
         {
-          label: 'Szisztolés átlag',
+          label: 'Szisztolés átlag - fekete oszlop',
           data: rows.map(r => r.sys || 0),
           backgroundColor: '#0b1220',
-          borderRadius: 4,
+          borderColor: '#0b1220',
+          borderWidth: 1.5,
+          borderRadius: 2,
         },
         {
-          label: 'Diasztolés átlag',
+          label: 'Diasztolés átlag - sraffozott oszlop',
           data: rows.map(r => r.dia || 0),
-          backgroundColor: '#c8432a',
-          borderRadius: 4,
+          backgroundColor: diagonalPattern,
+          borderColor: '#0b1220',
+          borderWidth: 1.5,
+          borderRadius: 2,
         }
       ]
     },
     options: {
       ...basePdfChartOptions('Napszak szerinti átlagok'),
       scales: {
-        x: { grid: { display: false }, ticks: { color: '#5c6479' } },
-        y: { beginAtZero: true, grid: { color: 'rgba(11,18,32,0.08)' }, ticks: { color: '#5c6479' } }
+        x: { grid: { display: false }, ticks: { color: '#0b1220' } },
+        y: { beginAtZero: true, grid: { color: 'rgba(11,18,32,0.18)' }, ticks: { color: '#0b1220' } }
       }
     }
   }, 880, 420);
@@ -1083,7 +1243,7 @@ async function showReminder(label) {
 }
 
 // ---------- Service Worker + Update handling ----------
-const CURRENT_VERSION = '1.0.4'; // az app jelenlegi verziója (a release script írja át)
+const CURRENT_VERSION = '1.0.5'; // az app jelenlegi verziója (a release script írja át)
 let pendingWorker = null;
 let pendingVersionInfo = null;
 
