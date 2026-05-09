@@ -4,7 +4,7 @@
 
 // ---------- IndexedDB Wrapper ----------
 const DB_NAME = 'tensio';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'readings';
 
 function openDB() {
@@ -12,10 +12,14 @@ function openDB() {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
+      let os;
       if (!db.objectStoreNames.contains(STORE)) {
-        const os = db.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
-        os.createIndex('ts', 'ts', { unique: false });
+        os = db.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+      } else {
+        os = e.target.transaction.objectStore(STORE);
       }
+      if (!os.indexNames.contains('ts')) os.createIndex('ts', 'ts', { unique: false });
+      if (!os.indexNames.contains('profileId')) os.createIndex('profileId', 'profileId', { unique: false });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -58,6 +62,51 @@ async function dbClear() {
     r.onerror = () => rej(r.error);
   });
 }
+async function dbPut(reading) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const r = tx.objectStore(STORE).put(reading);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function dbAssignMissingProfile(profileId) {
+  if (!profileId) return;
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const cursorReq = store.openCursor();
+    cursorReq.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (!cursor) return;
+      const value = cursor.value;
+      if (!value.profileId) cursor.update({ ...value, profileId });
+      cursor.continue();
+    };
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+async function dbClearForProfile(profileId) {
+  if (!profileId) return;
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const cursorReq = store.openCursor();
+    cursorReq.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (!cursor) return;
+      const value = cursor.value;
+      if (value.profileId === profileId || (!value.profileId && getProfiles().length === 1)) cursor.delete();
+      cursor.continue();
+    };
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
 
 // ---------- Settings (localStorage) ----------
 const SETTINGS_KEY = 'tensio-settings';
@@ -71,6 +120,223 @@ function getSettings() {
   catch { return { ...defaultSettings }; }
 }
 function setSettings(s) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
+
+
+// ---------- Profiles (localStorage + reading profileId) ----------
+const PROFILES_KEY = 'tensio-profiles';
+const ACTIVE_PROFILE_KEY = 'tensio-active-profile';
+
+function getProfiles() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PROFILES_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(p => p && typeof p.id === 'string' && typeof p.name === 'string')
+      .map(p => ({ ...p, name: p.name.trim() }))
+      .filter(p => p.name);
+  } catch {
+    return [];
+  }
+}
+function setProfiles(profiles) {
+  localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
+}
+function makeProfileId() {
+  return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+function normalizeProfileName(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ');
+}
+function getActiveProfileId() {
+  const profiles = getProfiles();
+  const saved = localStorage.getItem(ACTIVE_PROFILE_KEY);
+  if (profiles.some(p => p.id === saved)) return saved;
+  if (profiles[0]) {
+    localStorage.setItem(ACTIVE_PROFILE_KEY, profiles[0].id);
+    return profiles[0].id;
+  }
+  localStorage.removeItem(ACTIVE_PROFILE_KEY);
+  return null;
+}
+function getActiveProfile() {
+  const id = getActiveProfileId();
+  return getProfiles().find(p => p.id === id) || null;
+}
+function getProfileById(id) {
+  return getProfiles().find(p => p.id === id) || null;
+}
+function getActiveProfileName() {
+  return getActiveProfile()?.name || 'Nincs személy';
+}
+function setActiveProfileId(profileId) {
+  const profiles = getProfiles();
+  if (!profiles.some(p => p.id === profileId)) return false;
+  localStorage.setItem(ACTIVE_PROFILE_KEY, profileId);
+  return true;
+}
+function profileMatchesReading(reading, profileId) {
+  if (!profileId) return false;
+  // Régi, profil nélküli mérések: ha csak egy személy van, hozzá tartoznak.
+  if (!reading.profileId && getProfiles().length === 1) return true;
+  return reading.profileId === profileId;
+}
+async function dbForActiveProfile() {
+  const profileId = getActiveProfileId();
+  if (!profileId) return [];
+  const all = await dbAll();
+  return all.filter(r => profileMatchesReading(r, profileId));
+}
+function safeFilePart(text) {
+  return String(text || 'szemely')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'szemely';
+}
+function ensureActiveProfileOrPrompt() {
+  const profile = getActiveProfile();
+  if (!profile) {
+    showProfileModal(true);
+    toast('Először adj meg egy nevet');
+    return null;
+  }
+  return profile;
+}
+async function addProfileFromName(rawName, makeActive = true) {
+  const name = normalizeProfileName(rawName);
+  if (!name) throw new Error('Adj meg egy nevet');
+  const profiles = getProfiles();
+  if (profiles.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+    throw new Error('Ez a név már szerepel');
+  }
+  const profile = { id: makeProfileId(), name, createdAt: Date.now() };
+  const next = [...profiles, profile];
+  setProfiles(next);
+  if (makeActive || next.length === 1) setActiveProfileId(profile.id);
+  // Az eddigi, profil nélküli mérések az első megadott személyhez kerülnek.
+  if (next.length === 1) await dbAssignMissingProfile(profile.id);
+  renderProfileControls();
+  refreshCurrentView();
+  return profile;
+}
+async function deleteActiveProfile() {
+  const profile = getActiveProfile();
+  if (!profile) return;
+  const profiles = getProfiles();
+  if (!confirm(`Biztosan törlöd ezt a személyt és az összes hozzá tartozó mérést?\n\n${profile.name}`)) return;
+  await dbClearForProfile(profile.id);
+  const next = profiles.filter(p => p.id !== profile.id);
+  setProfiles(next);
+  if (next[0]) localStorage.setItem(ACTIVE_PROFILE_KEY, next[0].id);
+  else localStorage.removeItem(ACTIVE_PROFILE_KEY);
+  toast('Személy törölve');
+  renderProfileControls();
+  refreshCurrentView();
+  if (!next.length) showProfileModal(true);
+}
+function renderProfileControls() {
+  const profiles = getProfiles();
+  const activeId = getActiveProfileId();
+  const activeName = getActiveProfileName();
+
+  const label = $('#activeProfileLabel');
+  if (label) label.textContent = profiles.length ? activeName : 'Név megadása';
+
+  const fillSelect = (el) => {
+    if (!el) return;
+    el.innerHTML = profiles.length
+      ? profiles.map(p => `<option value="${escapeHtml(p.id)}" ${p.id === activeId ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')
+      : '<option value="">Nincs megadott személy</option>';
+    el.disabled = !profiles.length;
+  };
+  fillSelect($('#readingProfileSelect'));
+  fillSelect($('#profileSettingsSelect'));
+  fillSelect($('#profileModalSelect'));
+
+  const fillList = (el) => {
+    if (!el) return;
+    el.innerHTML = profiles.length
+      ? profiles.map(p => `<span class="profile-tag ${p.id === activeId ? 'active' : ''}">${escapeHtml(p.name)}</span>`).join('')
+      : '<span class="setting-hint">Még nincs név megadva.</span>';
+  };
+  fillList($('#profileList'));
+  fillList($('#profileModalList'));
+
+  const continueBtn = $('#profileModalContinue');
+  if (continueBtn) continueBtn.disabled = !profiles.length;
+  const deleteBtn = $('#deleteProfile');
+  if (deleteBtn) deleteBtn.disabled = !profiles.length;
+}
+function switchProfile(profileId) {
+  if (!setActiveProfileId(profileId)) return;
+  renderProfileControls();
+  refreshCurrentView();
+  toast(`Aktív személy: ${getActiveProfileName()}`);
+}
+function refreshCurrentView() {
+  const current = $('.view.active')?.dataset.view || 'dashboard';
+  if (current === 'add') {
+    renderProfileControls();
+    const profile = getActiveProfile();
+    const ts = $('#ts')?.value ? new Date($('#ts').value).getTime() : Date.now();
+    $('#addTimestamp').textContent = profile
+      ? `${profile.name} · kiválasztott időpont: ${fmtDateTimeShort(ts)}`
+      : `Először adj meg egy nevet · ${fmtDateTimeShort(ts)}`;
+  } else if (current === 'history') renderHistory();
+  else renderDashboard();
+}
+function showProfileModal(force = false) {
+  renderProfileControls();
+  const modal = $('#profileModal');
+  if (!modal) return;
+  modal.dataset.force = force ? '1' : '0';
+  modal.classList.add('open');
+  setTimeout(() => $('#profileModalName')?.focus(), 120);
+}
+function closeProfileModal() {
+  const modal = $('#profileModal');
+  if (!modal) return;
+  if (modal.dataset.force === '1' && !getProfiles().length) {
+    toast('Adj meg legalább egy nevet');
+    return;
+  }
+  modal.classList.remove('open');
+}
+function bindProfileEvents() {
+  $('#profileBtn')?.addEventListener('click', () => showProfileModal(false));
+  $('#profileModalClose')?.addEventListener('click', closeProfileModal);
+  $('#profileModalBackdrop')?.addEventListener('click', closeProfileModal);
+  $('#profileModalContinue')?.addEventListener('click', closeProfileModal);
+
+  const handleSelect = (e) => switchProfile(e.target.value);
+  $('#readingProfileSelect')?.addEventListener('change', handleSelect);
+  $('#profileSettingsSelect')?.addEventListener('change', handleSelect);
+  $('#profileModalSelect')?.addEventListener('change', handleSelect);
+
+  async function handleAdd(inputSelector, warningSelector) {
+    const input = $(inputSelector);
+    const warning = warningSelector ? $(warningSelector) : null;
+    if (warning) warning.textContent = '';
+    try {
+      await addProfileFromName(input?.value || '', true);
+      if (input) input.value = '';
+      toast('Név hozzáadva');
+    } catch (err) {
+      const msg = err?.message || 'Nem sikerült hozzáadni';
+      if (warning) warning.textContent = msg;
+      toast(msg);
+    }
+  }
+  $('#addProfile')?.addEventListener('click', () => handleAdd('#newProfileName'));
+  $('#profileModalAdd')?.addEventListener('click', () => handleAdd('#profileModalName', '#profileModalWarning'));
+  $('#newProfileName')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#addProfile')?.click(); } });
+  $('#profileModalName')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#profileModalAdd')?.click(); } });
+  $('#deleteProfile')?.addEventListener('click', deleteActiveProfile);
+}
+function initializeProfiles() {
+  renderProfileControls();
+  if (!getProfiles().length) showProfileModal(true);
+}
 
 // ---------- BP Classification (ESH 2023) ----------
 // Koncentrálva otthoni mérésre. Az otthoni küszöb ≥135/85 = magas.
@@ -153,25 +419,34 @@ $$('.tab').forEach(t => t.addEventListener('click', () => go(t.dataset.goto)));
 
 // ---------- Add form ----------
 function initAddForm() {
+  renderProfileControls();
+  const profile = getActiveProfile();
+  if (!profile) showProfileModal(true);
   const now = new Date();
   now.setSeconds(0,0);
   const tz = now.getTimezoneOffset()*60000;
   $('#ts').value = new Date(now - tz).toISOString().slice(0,16);
-  $('#addTimestamp').textContent = `Mostani időpont: ${fmtDateTimeShort(now.getTime())}`;
+  $('#addTimestamp').textContent = profile
+    ? `${profile.name} · mostani időpont: ${fmtDateTimeShort(now.getTime())}`
+    : `Először adj meg egy nevet · ${fmtDateTimeShort(now.getTime())}`;
   $('#sys').value = ''; $('#dia').value = ''; $('#pulse').value = '';
   setTimeout(() => $('#sys').focus(), 200);
 }
 
 $('#addForm').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const profileId = $('#readingProfileSelect')?.value || getActiveProfileId();
+  const profile = getProfileById(profileId);
+  if (!profile) { showProfileModal(true); toast('Először válassz vagy adj hozzá egy személyt'); return; }
   const sys = parseInt($('#sys').value, 10);
   const dia = parseInt($('#dia').value, 10);
   const pulse = parseInt($('#pulse').value, 10);
   const ts = new Date($('#ts').value).getTime();
   if (!sys || !dia || !pulse || isNaN(ts)) { toast('Hiányzó vagy érvénytelen adat'); return; }
   if (sys <= dia) { toast('A szisztolés értéknek nagyobbnak kell lennie a diasztolésnál'); return; }
-  await dbAdd({ sys, dia, pulse, ts });
-  toast('Mérés elmentve');
+  setActiveProfileId(profileId);
+  await dbAdd({ profileId, sys, dia, pulse, ts });
+  toast(`${profile.name} mérése elmentve`);
   go('dashboard');
 });
 
@@ -179,11 +454,16 @@ $('#cancelAdd').addEventListener('click', () => go('dashboard'));
 
 // ---------- History ----------
 async function renderHistory() {
-  const list = await dbAll();
+  const profile = getActiveProfile();
+  const list = await dbForActiveProfile();
   const el = $('#historyList');
-  $('#historyCount').textContent = `${list.length} bejegyzés`;
+  $('#historyCount').textContent = profile ? `${list.length} bejegyzés · ${profile.name}` : 'Nincs kiválasztott személy';
+  if (!profile) {
+    el.innerHTML = `<div class="history-empty">Adj meg egy nevet a mérések vezetéséhez.</div>`;
+    return;
+  }
   if (!list.length) {
-    el.innerHTML = `<div class="history-empty">Még nincs rögzített mérés.</div>`;
+    el.innerHTML = `<div class="history-empty">${escapeHtml(profile.name)} számára még nincs rögzített mérés.</div>`;
     return;
   }
   el.innerHTML = list.map(r => {
@@ -220,7 +500,22 @@ let trendChart = null;
 let amPmChart = null;
 
 async function renderDashboard() {
-  const all = await dbAll();
+  const profile = getActiveProfile();
+  const all = await dbForActiveProfile();
+
+  if (!profile) {
+    $('#todayAvg').textContent = '—';
+    $('#todaySub').textContent = 'Adj meg egy nevet, majd válaszd ki, kinek szeretnél mérést rögzíteni.';
+    $('#catBar').className = 'cat-bar';
+    $('#catLabel').textContent = 'Nincs személy kiválasztva';
+    $('#catDesc').textContent = 'A jobb felső név gombbal adhatsz hozzá személyeket.';
+    $('#avg7').textContent = '—'; $('#avg7n').textContent = '0 mérés';
+    $('#avg30').textContent = '—'; $('#avg30n').textContent = '0 mérés';
+    $('#ppAvg').textContent = '—'; $('#mapAvg').textContent = '—';
+    drawTrendChart([], 30);
+    drawAmPmChart([]);
+    return;
+  }
 
   // Today
   const today0 = new Date(); today0.setHours(0,0,0,0);
@@ -232,7 +527,7 @@ async function renderDashboard() {
     $('#todaySub').textContent = `${today.length} mérés ma · átlag pulzus ${round(mean(today.map(r=>r.pulse)))}/perc`;
   } else {
     $('#todayAvg').textContent = '—';
-    $('#todaySub').textContent = 'Még nincs mérés ma. Vegyél fel egyet.';
+    $('#todaySub').textContent = `${profile.name}: még nincs mérés ma. Vegyél fel egyet.`;
   }
 
   // Category (based on 7-day avg, or latest if few data)
@@ -523,6 +818,7 @@ function openSettings() {
   $('#remindersOn').checked = s.remindersOn;
   $('#remindAM').value = s.remindAM;
   $('#remindPM').value = s.remindPM;
+  renderProfileControls();
   updateNotifStatus();
   settingsModal.classList.add('open');
 }
@@ -580,23 +876,33 @@ function updateNotifStatus() {
 
 // ---------- Export ----------
 $('#exportJson').addEventListener('click', async () => {
-  const data = await dbAll();
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  download(blob, `tensio-export-${todayStr()}.json`);
+  const profile = ensureActiveProfileOrPrompt();
+  if (!profile) return;
+  const data = await dbForActiveProfile();
+  const exportData = {
+    profile: { id: profile.id, name: profile.name },
+    exportedAt: new Date().toISOString(),
+    readings: data.map(r => ({ ...r, profileName: profile.name }))
+  };
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+  download(blob, `tensio-export-${safeFilePart(profile.name)}-${todayStr()}.json`);
 });
 
 $('#exportCsv').addEventListener('click', async () => {
-  const data = await dbAll();
+  const profile = ensureActiveProfileOrPrompt();
+  if (!profile) return;
+  const data = await dbForActiveProfile();
   // Excel Android gyakran dátumként kezeli az első oszlopot,
   // és ha nem fér ki, ########-et ír. Ezért az időpontot
   // szövegként adjuk át Excelnek: ="2026.05.09. 10:47".
-  let csv = '\uFEFFidopont;szisztoles;diasztoles;pulzus\n';
+  let csv = '\uFEFFnev;idopont;szisztoles;diasztoles;pulzus\n';
+  const csvName = profile.name.replace(/"/g, '""');
   for (const r of data) {
     const d = fmtCsvDateTime(r.ts);
-    csv += `="${d}";${r.sys};${r.dia};${r.pulse}\n`;
+    csv += `"${csvName}";="${d}";${r.sys};${r.dia};${r.pulse}\n`;
   }
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  download(blob, `tensio-export-${todayStr()}.csv`);
+  download(blob, `tensio-export-${safeFilePart(profile.name)}-${todayStr()}.csv`);
 });
 
 $('#exportPdf').addEventListener('click', exportPdf);
@@ -607,9 +913,11 @@ async function exportPdf() {
     return;
   }
 
-  const data = (await dbAll()).sort((a, b) => a.ts - b.ts);
+  const profile = ensureActiveProfileOrPrompt();
+  if (!profile) return;
+  const data = (await dbForActiveProfile()).sort((a, b) => a.ts - b.ts);
   if (!data.length) {
-    toast('Nincs exportálható mérés');
+    toast(`${profile.name} számára nincs exportálható mérés`);
     return;
   }
 
@@ -622,8 +930,8 @@ async function exportPdf() {
       createAmPmChartImage(data),
     ]);
 
-    const docDefinition = buildPdfDocument(data, stats, { trendImg, dailyAvgImg, amPmImg });
-    pdfMake.createPdf(docDefinition).download(`tensio-jelentes-${todayStr()}.pdf`);
+    const docDefinition = buildPdfDocument(data, stats, { trendImg, dailyAvgImg, amPmImg }, profile);
+    pdfMake.createPdf(docDefinition).download(`tensio-jelentes-${safeFilePart(profile.name)}-${todayStr()}.pdf`);
     toast('PDF export elindult');
   } catch (err) {
     console.error('PDF export failed', err);
@@ -694,7 +1002,7 @@ function fmtPdfPeriod(firstTs, lastTs) {
   return `${fmtDateHu(firstTs)} - ${fmtDateHu(lastTs)}`;
 }
 
-function buildPdfDocument(data, stats, images) {
+function buildPdfDocument(data, stats, images, profile) {
   const generatedAt = new Date().toLocaleString('hu-HU', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
   const latestClass = classify(stats.latest.sys, stats.latest.dia);
   const avgText = stats.allAvg
@@ -705,13 +1013,13 @@ function buildPdfDocument(data, stats, images) {
     pageSize: 'A4',
     pageMargins: [34, 44, 34, 44],
     info: {
-      title: 'Tensio vérnyomás jelentés',
+      title: `Tensio vérnyomás jelentés - ${profile?.name || ''}`,
       author: 'Tensio',
       subject: 'Vérnyomás mérések, átlagok és grafikonok',
     },
     defaultStyle: { font: 'Roboto', fontSize: 9, color: '#0b1220' },
     footer: (currentPage, pageCount) => ({
-      text: `Tensio vérnyomás jelentés · ${currentPage}/${pageCount}`,
+      text: `Tensio vérnyomás jelentés · ${profile?.name || '—'} · ${currentPage}/${pageCount}`,
       alignment: 'center',
       fontSize: 8,
       color: '#8892a6',
@@ -733,6 +1041,7 @@ function buildPdfDocument(data, stats, images) {
             width: '*',
             stack: [
               { text: 'Tensio vérnyomás jelentés', style: 'h1' },
+              { text: `Személy: ${profile?.name || '—'}`, style: 'meta' },
               { text: `Készült: ${generatedAt}` , style: 'meta' },
               { text: `Időszak: ${fmtPdfPeriod(stats.firstTs, stats.lastTs)} · ${data.length} mérés`, style: 'meta' },
             ]
@@ -1168,9 +1477,11 @@ function createAmPmChartImage(readings) {
   }, 880, 420);
 }
 $('#clearAll').addEventListener('click', async () => {
-  if (!confirm('Biztosan törlöd az ÖSSZES bejegyzést? Ez nem visszavonható.')) return;
-  await dbClear();
-  toast('Minden adat törölve');
+  const profile = ensureActiveProfileOrPrompt();
+  if (!profile) return;
+  if (!confirm(`Biztosan törlöd ${profile.name} ÖSSZES mérését? Ez nem visszavonható.`)) return;
+  await dbClearForProfile(profile.id);
+  toast(`${profile.name} mérései törölve`);
   closeSettings();
   renderDashboard();
 });
@@ -1218,9 +1529,10 @@ function scheduleReminders() {
 }
 async function showReminder(label) {
   const today0 = new Date(); today0.setHours(0,0,0,0);
-  const all = await dbAll();
+  const profile = getActiveProfile();
+  if (!profile) return;
+  const all = await dbForActiveProfile();
   const todayReadings = all.filter(r => r.ts >= today0.getTime());
-  const h = new Date().getHours();
   const isMorningSlot = label === 'reggeli';
   const already = todayReadings.some(r => {
     const rh = new Date(r.ts).getHours();
@@ -1231,19 +1543,19 @@ async function showReminder(label) {
   if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
     const reg = await navigator.serviceWorker.ready;
     reg.showNotification('Tensio', {
-      body: `Ideje a ${label} vérnyomás mérésnek`,
+      body: `${profile.name}: ideje a ${label} vérnyomás mérésnek`,
       icon: 'icon-192.png',
       badge: 'icon-192.png',
       tag: 'bp-reminder',
       requireInteraction: false,
     });
   } else {
-    new Notification('Tensio', { body: `Ideje a ${label} vérnyomás mérésnek`, icon:'icon-192.png' });
+    new Notification('Tensio', { body: `${profile.name}: ideje a ${label} vérnyomás mérésnek`, icon:'icon-192.png' });
   }
 }
 
 // ---------- Service Worker + Update handling ----------
-const CURRENT_VERSION = '1.0.5'; // az app jelenlegi verziója (a release script írja át)
+const CURRENT_VERSION = '1.0.6'; // az app jelenlegi verziója (a release script írja át)
 let pendingWorker = null;
 let pendingVersionInfo = null;
 
@@ -1362,6 +1674,8 @@ function escapeHtml(s) {
 
 // ---------- Boot ----------
 window.addEventListener('DOMContentLoaded', async () => {
+  bindProfileEvents();
+  initializeProfiles();
   await renderDashboard();
   scheduleReminders();
 });
@@ -1369,6 +1683,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 // Re-schedule reminders on visibility change (phone wake)
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
+    renderProfileControls();
     scheduleReminders();
     renderDashboard();
   }

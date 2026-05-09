@@ -1,7 +1,7 @@
 {
-    "version":  "1.0.5",
+    "version":  "1.0.6",
     "released":  "2026-05-09",
     "notes":  [
-                  "fix: grafikonok fekete fehér nyomtaton is jók PDF"
+                  "feat: személyek is hozzá adhatóak."
               ]
 }
