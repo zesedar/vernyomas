@@ -1,6 +1,6 @@
 // Tensio Service Worker
 // Frissítéshez: emeld a VERSION-t, és frissítsd a version.json-t is ugyanerre.
-const VERSION = '1.0.3';
+const VERSION = '1.0.4';
 const CACHE = `tensio-${VERSION}`;
 
 const ASSETS = [

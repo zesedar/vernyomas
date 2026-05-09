@@ -1,7 +1,7 @@
 {
-    "version":  "1.0.3",
+    "version":  "1.0.4",
     "released":  "2026-05-09",
     "notes":  [
-                  "fix: Dátum csv-be mostmár szövegként kerül hogy ne legyen ####"
+                  "PDF export implementálás grafikonokkal."
               ]
 }
