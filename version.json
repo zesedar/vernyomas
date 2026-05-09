@@ -1,7 +1,7 @@
 {
-    "version":  "1.0.2",
+    "version":  "1.0.3",
     "released":  "2026-05-09",
     "notes":  [
-                  "Javítva a csv exportnál a fölösleges karakterek a dátum mezőben."
+                  "fix: Dátum csv-be mostmár szövegként kerül hogy ne legyen ####"
               ]
 }

@@ -575,10 +575,13 @@ $('#exportJson').addEventListener('click', async () => {
 });
 $('#exportCsv').addEventListener('click', async () => {
   const data = await dbAll();
-  let csv = 'idopont;szisztoles;diasztoles;pulzus\n';
+  // Excel Android gyakran dátumként kezeli az első oszlopot,
+  // és ha nem fér ki, ########-et ír. Ezért az időpontot
+  // szövegként adjuk át Excelnek: ="2026.05.09. 10:47".
+  let csv = '\uFEFFidopont;szisztoles;diasztoles;pulzus\n';
   for (const r of data) {
     const d = fmtCsvDateTime(r.ts);
-    csv += `${d};${r.sys};${r.dia};${r.pulse}\n`;
+    csv += `="${d}";${r.sys};${r.dia};${r.pulse}\n`;
   }
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   download(blob, `tensio-export-${todayStr()}.csv`);
@@ -592,10 +595,13 @@ $('#clearAll').addEventListener('click', async () => {
 });
 function download(blob, filename) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
+  a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function todayStr() {
   const d = new Date();
@@ -656,7 +662,7 @@ async function showReminder(label) {
 }
 
 // ---------- Service Worker + Update handling ----------
-const CURRENT_VERSION = '1.0.2'; // az app jelenlegi verziója (a release script írja át)
+const CURRENT_VERSION = '1.0.3'; // az app jelenlegi verziója (a release script írja át)
 let pendingWorker = null;
 let pendingVersionInfo = null;
 
