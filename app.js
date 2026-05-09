@@ -285,6 +285,104 @@ function refreshCurrentView() {
   } else if (current === 'history') renderHistory();
   else renderDashboard();
 }
+
+function ensureProfileUi() {
+  if (!document.getElementById('profileUiStyle')) {
+    const style = document.createElement('style');
+    style.id = 'profileUiStyle';
+    style.textContent = `
+      .topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+      .profile-pill { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 0 12px; border: 1px solid rgba(11,18,32,0.12); border-radius: 999px; background: rgba(246,241,231,0.94); color: #0b1220; font-family: 'Inter Tight', sans-serif; font-weight: 800; font-size: 13px; cursor: pointer; box-shadow: 0 8px 24px rgba(11,18,32,0.08); white-space: nowrap; }
+      .profile-pill svg { flex: 0 0 auto; }
+      .profile-pill .profile-name { max-width: 112px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .profile-pill .profile-caret { opacity: .58; font-size: 11px; margin-left: 1px; }
+      .profile-inline-cta { margin-top: 10px; display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 14px; border: 0; border-radius: 999px; background: #0b1220; color: #f6f1e7; font-family: 'Inter Tight', sans-serif; font-weight: 800; cursor: pointer; }
+      .profile-fieldset { display: grid; gap: 10px; }
+      .profile-row { display: flex; gap: 8px; align-items: stretch; }
+      .profile-row .field, .profile-row input, .profile-row select { flex: 1; min-width: 0; }
+      .field-input select, .field select, .profile-inline-input { width: 100%; border: 0; background: transparent; color: #0b1220; font: inherit; outline: none; }
+      .profile-inline-input { min-height: 42px; padding: 0 12px; border-radius: 12px; background: rgba(11,18,32,0.04); border: 1px solid rgba(11,18,32,0.08); font-family: 'Inter Tight', sans-serif; }
+      .profile-list { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 2px; }
+      .profile-tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: rgba(11,18,32,0.06); color: #0b1220; font-family: 'Inter Tight', sans-serif; font-weight: 700; font-size: 12px; }
+      .profile-tag.active { background: #0b1220; color: #f6f1e7; }
+      .profile-modal .modal-body { max-width: 460px; }
+      .profile-intro { margin: 6px 0 16px; color: #5c6479; line-height: 1.45; font-family: 'Inter Tight', sans-serif; }
+      .profile-warning { color: #c8432a; font-size: 12px; font-weight: 700; margin-top: 4px; min-height: 16px; }
+      @media (max-width: 420px) {
+        .profile-pill { padding: 0 10px; font-size: 12px; }
+        .profile-pill .profile-name { max-width: 88px; }
+        .profile-row { flex-direction: column; }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  if (!document.getElementById('profileBtn')) {
+    const btn = document.createElement('button');
+    btn.className = 'profile-pill';
+    btn.id = 'profileBtn';
+    btn.type = 'button';
+    btn.setAttribute('aria-label', 'Személy kiválasztása');
+    btn.setAttribute('data-open-profile', '');
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg><span class="profile-name" id="activeProfileLabel">Név megadása</span><span class="profile-caret">▾</span>`;
+
+    const settingsBtn = document.getElementById('settingsBtn');
+    if (settingsBtn) {
+      let actions = settingsBtn.closest('.topbar-actions');
+      if (!actions) {
+        actions = document.createElement('div');
+        actions.className = 'topbar-actions';
+        settingsBtn.parentNode.insertBefore(actions, settingsBtn);
+        actions.appendChild(settingsBtn);
+      }
+      actions.insertBefore(btn, settingsBtn);
+    } else {
+      const topbar = document.querySelector('.topbar');
+      if (topbar) {
+        let actions = topbar.querySelector('.topbar-actions');
+        if (!actions) {
+          actions = document.createElement('div');
+          actions.className = 'topbar-actions';
+          topbar.appendChild(actions);
+        }
+        actions.appendChild(btn);
+      }
+    }
+  }
+
+  if (!document.getElementById('profileModal')) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="modal profile-modal" id="profileModal" aria-hidden="true">
+        <div class="modal-backdrop" id="profileModalBackdrop"></div>
+        <div class="modal-body">
+          <div class="modal-head">
+            <div class="sheet-title">Személy kiválasztása</div>
+            <button class="icon-btn" id="profileModalClose" aria-label="Bezár" type="button">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6 L18 18 M18 6 L6 18"/></svg>
+            </button>
+          </div>
+          <p class="profile-intro">Add meg azoknak a nevét, akiknek külön szeretnéd vezetni a vérnyomásnaplót. Ezután bármikor válthatsz közöttük, és a mérések személyenként külön jelennek meg.</p>
+          <div class="profile-fieldset">
+            <label class="field compact">
+              <span class="field-label">Aktív személy</span>
+              <div class="field-input"><select id="profileModalSelect"></select></div>
+            </label>
+            <div class="profile-row">
+              <input class="profile-inline-input" id="profileModalName" type="text" placeholder="Név, pl. Anya" maxlength="40" autocomplete="off">
+              <button class="btn ghost sm" id="profileModalAdd" type="button">Hozzáadás</button>
+            </div>
+            <div class="profile-warning" id="profileModalWarning"></div>
+            <div class="profile-list" id="profileModalList"></div>
+            <div class="form-actions">
+              <button class="btn primary" id="profileModalContinue" type="button">Folytatás</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `);
+  }
+}
+
 function showProfileModal(force = false) {
   renderProfileControls();
   const modal = $('#profileModal');
@@ -303,6 +401,10 @@ function closeProfileModal() {
   modal.classList.remove('open');
 }
 function bindProfileEvents() {
+  ensureProfileUi();
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-open-profile]')) showProfileModal(false);
+  });
   $('#profileBtn')?.addEventListener('click', () => showProfileModal(false));
   $('#profileModalClose')?.addEventListener('click', closeProfileModal);
   $('#profileModalBackdrop')?.addEventListener('click', closeProfileModal);
@@ -334,6 +436,7 @@ function bindProfileEvents() {
   $('#deleteProfile')?.addEventListener('click', deleteActiveProfile);
 }
 function initializeProfiles() {
+  ensureProfileUi();
   renderProfileControls();
   if (!getProfiles().length) showProfileModal(true);
 }
@@ -508,7 +611,7 @@ async function renderDashboard() {
     $('#todaySub').textContent = 'Adj meg egy nevet, majd válaszd ki, kinek szeretnél mérést rögzíteni.';
     $('#catBar').className = 'cat-bar';
     $('#catLabel').textContent = 'Nincs személy kiválasztva';
-    $('#catDesc').textContent = 'A jobb felső név gombbal adhatsz hozzá személyeket.';
+    $('#catDesc').innerHTML = 'Adj hozzá legalább egy személyt, majd válaszd ki, kinek szeretnél mérést rögzíteni.<br><button class="profile-inline-cta" type="button" data-open-profile>Személy hozzáadása</button>';
     $('#avg7').textContent = '—'; $('#avg7n').textContent = '0 mérés';
     $('#avg30').textContent = '—'; $('#avg30n').textContent = '0 mérés';
     $('#ppAvg').textContent = '—'; $('#mapAvg').textContent = '—';
@@ -1555,7 +1658,7 @@ async function showReminder(label) {
 }
 
 // ---------- Service Worker + Update handling ----------
-const CURRENT_VERSION = '1.0.6'; // az app jelenlegi verziója (a release script írja át)
+const CURRENT_VERSION = '1.0.5'; // az app jelenlegi verziója (a release script írja át)
 let pendingWorker = null;
 let pendingVersionInfo = null;
 
