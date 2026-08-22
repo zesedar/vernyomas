@@ -602,6 +602,305 @@ async function renderHistory() {
 let trendChart = null;
 let amPmChart = null;
 
+// --- Otthoni mérésre érvényes küszöbök (ESH: otthoni 135/85, nem a rendelői 140/90) ---
+const HOME_SYS_LIMIT = 135;
+const HOME_DIA_LIMIT = 85;
+
+// --- Napszak-ablakok. Ez az EGYETLEN definíció: a PDF-es buildAmPmRows() is ezt használja
+// (lásd a lentebbi cserét), így a képernyő és a nyomtatott riport nem tér el egymástól.
+const DAYPARTS = [
+  { key: 'am',    label: 'Reggel',    range: '04:00-11:59', test: h => h >= 4  && h < 12 },
+  { key: 'mid',   label: 'Napközben', range: '12:00-16:59', test: h => h >= 12 && h < 17 },
+  { key: 'pm',    label: 'Este',      range: '17:00-23:59', test: h => h >= 17 && h < 24 },
+  { key: 'night', label: 'Éjszaka',   range: '00:00-03:59', test: h => h >= 0  && h < 4  },
+];
+
+// ---------- Pluginok ----------
+
+// Üres állapot: az afterDraw-ban kell rajzolni, különben az első animációs frame letörli.
+const emptyStatePlugin = {
+  id: 'emptyState',
+  afterDraw(chart, args, opts) {
+    const hasData = chart.data.datasets.some(d => (d.data || []).some(v => v != null));
+    if (hasData) return;
+    const { ctx, chartArea: a } = chart;
+    if (!a) return;
+    ctx.save();
+    ctx.fillStyle = '#8892a6';
+    ctx.font = 'italic 14px Fraunces, serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(opts?.text || 'Nincs adat ebben az időszakban',
+      (a.left + a.right) / 2, (a.top + a.bottom) / 2);
+    ctx.restore();
+  }
+};
+
+// Vízszintes referenciavonalak (küszöbértékek) a rácsok fölé, az adatsorok alá.
+const refLinesPlugin = {
+  id: 'refLines',
+  beforeDatasetsDraw(chart, args, opts) {
+    const lines = opts?.lines;
+    if (!lines?.length) return;
+    const { ctx, chartArea: a, scales: { y } } = chart;
+    if (!a || !y) return;
+    ctx.save();
+    lines.forEach(l => {
+      const py = y.getPixelForValue(l.value);
+      if (!Number.isFinite(py) || py < a.top || py > a.bottom) return;
+      ctx.beginPath();
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = l.color || 'rgba(200,67,42,0.40)';
+      ctx.moveTo(a.left, py);
+      ctx.lineTo(a.right, py);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (l.label) {
+        ctx.font = '10px JetBrains Mono, monospace';
+        ctx.fillStyle = l.color || 'rgba(200,67,42,0.75)';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(l.label, a.right - 4, py - 2);
+      }
+    });
+    ctx.restore();
+  }
+};
+
+// ---------- Trend ----------
+
+function drawTrendChart(all, days) {
+  const now = Date.now();
+  const from = now - days * 86400000;
+  const data = all.filter(r => r.ts >= from).sort((a, b) => a.ts - b.ts);
+
+  // Sok mérésnél a pontok összemosódnak – ilyenkor csak a vonal marad.
+  const pr = data.length > 60 ? 0 : 3;
+
+  const ctx = $('#trendChart').getContext('2d');
+  if (trendChart) trendChart.destroy();
+
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    plugins: [emptyStatePlugin, refLinesPlugin],
+    data: {
+      datasets: [
+        {
+          label: 'Szisztolés',
+          // {x, y} pontok: a valós időbeli távolságok megmaradnak
+          data: data.map(r => ({ x: r.ts, y: r.sys })),
+          borderColor: '#0b1220',
+          backgroundColor: 'rgba(11,18,32,0.06)',
+          tension: 0,                 // nincs interpoláció nem létező köztes értékekre
+          borderWidth: 2.4,
+          pointRadius: pr,
+          pointStyle: 'circle',
+          pointBackgroundColor: '#ffffff',
+          pointBorderColor: '#0b1220',
+          pointBorderWidth: 1.4,
+          pointHitRadius: 12,
+          pointHoverRadius: 5,
+        },
+        {
+          label: 'Diasztolés',
+          data: data.map(r => ({ x: r.ts, y: r.dia })),
+          borderColor: '#c8432a',
+          backgroundColor: 'rgba(200,67,42,0.06)',
+          tension: 0,
+          borderWidth: 2.4,
+          borderDash: [9, 6],
+          pointRadius: pr ? pr + 0.5 : 0,
+          pointStyle: 'triangle',
+          pointBackgroundColor: '#ffffff',
+          pointBorderColor: '#c8432a',
+          pointBorderWidth: 1.4,
+          pointHitRadius: 12,
+          pointHoverRadius: 5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      parsing: false,                 // már kész {x,y} pontokat adunk át
+      normalized: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        emptyState: { text: 'Nincs adat ebben az időszakban' },
+        refLines: {
+          lines: [
+            { value: HOME_SYS_LIMIT, label: `sziszt. ${HOME_SYS_LIMIT}` },
+            { value: HOME_DIA_LIMIT, label: `diaszt. ${HOME_DIA_LIMIT}` },
+          ]
+        },
+        legend: {
+          position: 'bottom',
+          labels: {
+            font: { family: 'Inter Tight', size: 11, weight: '600' },
+            color: '#5c6479',
+            usePointStyle: true,
+            padding: 14,
+          }
+        },
+        tooltip: {
+          backgroundColor: '#0b1220',
+          titleFont: { family: 'Inter Tight', weight: '600' },
+          bodyFont: { family: 'JetBrains Mono', size: 12 },
+          padding: 10,
+          cornerRadius: 6,
+          displayColors: true,
+          callbacks: {
+            title: (items) => new Date(items[0].parsed.x).toLocaleString('hu-HU', {
+              year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+            }),
+            label: (item) => `  ${item.dataset.label}: ${item.parsed.y} Hgmm`
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'time',
+          // Fix ablak: üres/rövid adatsornál is a kiválasztott időszak látszik
+          min: from,
+          max: now,
+          time: {
+            unit: days <= 30 ? 'day' : days <= 120 ? 'week' : 'month',
+          },
+          grid: { color: 'rgba(11,18,32,0.04)' },
+          ticks: {
+            font: { family: 'JetBrains Mono', size: 10 },
+            color: '#8892a6',
+            maxRotation: 0,
+            autoSkipPadding: 20,
+            callback: (v) => new Date(v).toLocaleDateString('hu-HU', { month: 'short', day: 'numeric' })
+          }
+        },
+        y: {
+          beginAtZero: false,
+          // Rögzített minimum-ablak: kis ingadozás ne látsszon drámainak,
+          // és a küszöbvonalak mindig a képen legyenek.
+          suggestedMin: 60,
+          suggestedMax: 160,
+          grid: { color: 'rgba(11,18,32,0.05)' },
+          ticks: {
+            font: { family: 'JetBrains Mono', size: 10 },
+            color: '#8892a6',
+          }
+        }
+      }
+    }
+  });
+}
+
+// ---------- Reggel / napközben / este ----------
+
+function drawAmPmChart(all) {
+  const last7 = all.filter(r => withinDays(r.ts, 7));
+
+  const groups = DAYPARTS.map(dp => {
+    const rows = last7.filter(r => dp.test(new Date(r.ts).getHours()));
+    return {
+      ...dp,
+      n: rows.length,
+      // null (nem 0!): hiányzó napszak nem húzza le a skálát és nem rajzol üres oszlopot
+      sys: rows.length ? round(mean(rows.map(r => r.sys))) : null,
+      dia: rows.length ? round(mean(rows.map(r => r.dia))) : null,
+    };
+  });
+
+  // A képernyőn csak a ténylegesen használt napszakok kapnak oszlopot
+  // (a PDF-ben mind a négy sor szerepel, ott a "—" jelöli az üreset).
+  const shown = groups.filter(g => g.n > 0);
+
+  const styles = {
+    am:    { backgroundColor: '#0b1220', borderColor: '#0b1220' },
+    mid:   { backgroundColor: '#b9c0cf', borderColor: '#8892a6' },
+    pm:    { backgroundColor: makePrintPattern('diagonal') || '#c8432a', borderColor: '#c8432a' },
+    night: { backgroundColor: makePrintPattern('cross') || '#5c6479', borderColor: '#5c6479' },
+  };
+
+  const ctx = $('#amPmChart').getContext('2d');
+  if (amPmChart) amPmChart.destroy();
+
+  amPmChart = new Chart(ctx, {
+    type: 'bar',
+    plugins: [emptyStatePlugin],
+    data: {
+      labels: ['Szisztolés', 'Diasztolés'],
+      datasets: shown.map(g => ({
+        label: `${g.label} (${g.n})`,
+        data: [g.sys, g.dia],
+        ...styles[g.key],
+        borderWidth: 1.2,
+        borderRadius: 4,
+        maxBarThickness: 28,
+      }))
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        emptyState: { text: 'Nincs mérés az elmúlt 7 napban' },
+        legend: {
+          position: 'bottom',
+          labels: {
+            font: { family: 'Inter Tight', size: 11, weight: '600' },
+            color: '#5c6479',
+            usePointStyle: true,
+            pointStyle: 'rect',
+            padding: 12,
+          }
+        },
+        tooltip: {
+          backgroundColor: '#0b1220',
+          titleFont: { family: 'Inter Tight', weight: '600' },
+          bodyFont: { family: 'JetBrains Mono', size: 12 },
+          padding: 10,
+          cornerRadius: 6,
+          callbacks: {
+            label: (item) => item.parsed.y == null
+              ? `  ${item.dataset.label}: nincs adat`
+              : `  ${item.dataset.label}: ${item.parsed.y} Hgmm`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { font: { family: 'Inter Tight', size: 12, weight: '500' }, color: '#5c6479' }
+        },
+        y: {
+          // Oszlopdiagram MINDIG 0-tól: csonkolt tengely eltúlozza a különbséget.
+          beginAtZero: true,
+          suggestedMax: 160,
+          grid: { color: 'rgba(11,18,32,0.05)' },
+          ticks: { font: { family: 'JetBrains Mono', size: 10 }, color: '#8892a6' }
+        }
+      }
+    }
+  });
+
+  // ---- Reggel–este eltérés ----
+  const am = groups.find(g => g.key === 'am');
+  const pm = groups.find(g => g.key === 'pm');
+  const note = $('#ampmNote');
+
+  if (am.n >= 2 && pm.n >= 2) {
+    const diff = am.sys - pm.sys;
+    if (diff >= 15) {
+      note.textContent = `A reggeli szisztolés átlag ${diff} Hgmm-rel magasabb az estinél. Kifejezett reggeli–esti eltérés — érdemes az orvosoddal megbeszélni. (Megjegyzés: ez nem azonos az alvás alatti minimumhoz mért „morning surge"-dzsel, amit csak 24 órás monitorozás mutat meg.)`;
+    } else if (diff <= -15) {
+      note.textContent = `Az esti szisztolés átlag ${Math.abs(diff)} Hgmm-rel magasabb a reggelinél. Ez kevésbé jellemző mintázat — ha tartós, érdemes megbeszélni orvossal.`;
+    } else {
+      note.textContent = `A reggeli és esti átlagok különbsége ${Math.abs(diff)} Hgmm — jellemző napi ritmus.`;
+    }
+    note.classList.add('show');
+  } else {
+    note.classList.remove('show');
+  }
+}
+
 async function renderDashboard() {
   const profile = getActiveProfile();
   const all = await dbForActiveProfile();
@@ -678,229 +977,6 @@ async function renderDashboard() {
 
   // AM/PM
   drawAmPmChart(all);
-}
-
-function drawTrendChart(all, days) {
-  const data = all.filter(r => withinDays(r.ts, days)).sort((a,b)=>a.ts-b.ts);
-  const ctx = $('#trendChart').getContext('2d');
-  if (trendChart) trendChart.destroy();
-
-  const labels = data.map(r => new Date(r.ts));
-  const sysData = data.map(r => r.sys);
-  const diaData = data.map(r => r.dia);
-
-  // Range bands (reference zones)
-  const annotations = [];
-
-  trendChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Szisztolés',
-          data: sysData,
-          borderColor: '#0b1220',
-          backgroundColor: 'rgba(11,18,32,0.06)',
-          tension: 0.3,
-          borderWidth: 2.4,
-          pointRadius: 3,
-          pointStyle: 'circle',
-          pointBackgroundColor: '#ffffff',
-          pointBorderColor: '#0b1220',
-          pointBorderWidth: 1.4,
-          pointHoverRadius: 5,
-        },
-        {
-          label: 'Diasztolés',
-          data: diaData,
-          borderColor: '#c8432a',
-          backgroundColor: 'rgba(200,67,42,0.06)',
-          tension: 0.3,
-          borderWidth: 2.4,
-          borderDash: [9, 6],
-          pointRadius: 3.5,
-          pointStyle: 'triangle',
-          pointBackgroundColor: '#ffffff',
-          pointBorderColor: '#c8432a',
-          pointBorderWidth: 1.4,
-          pointHoverRadius: 5,
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            font: { family: 'Inter Tight', size: 11, weight: '600' },
-            color: '#5c6479',
-            usePointStyle: true,
-            padding: 14,
-          }
-        },
-        tooltip: {
-          backgroundColor: '#0b1220',
-          titleFont: { family: 'Inter Tight', weight: '600' },
-          bodyFont: { family: 'JetBrains Mono', size: 12 },
-          padding: 10,
-          cornerRadius: 6,
-          displayColors: true,
-          callbacks: {
-            title: (items) => {
-              const ts = items[0].parsed.x;
-              return new Date(ts).toLocaleString('hu-HU', {
-                year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'
-              });
-            },
-            label: (item) => `  ${item.dataset.label}: ${item.parsed.y} Hgmm`
-          }
-        }
-      },
-      scales: {
-        x: {
-          type: 'time',
-          time: {
-            unit: days <= 7 ? 'day' : days <= 30 ? 'day' : 'week',
-            displayFormats: { day: 'MMM d', week: 'MMM d' }
-          },
-          grid: { color: 'rgba(11,18,32,0.04)' },
-          ticks: {
-            font: { family: 'JetBrains Mono', size: 10 },
-            color: '#8892a6',
-            maxRotation: 0,
-            autoSkipPadding: 20
-          }
-        },
-        y: {
-          beginAtZero: false,
-          grid: { color: 'rgba(11,18,32,0.05)' },
-          ticks: {
-            font: { family: 'JetBrains Mono', size: 10 },
-            color: '#8892a6',
-          }
-        }
-      }
-    }
-  });
-
-  // If no data
-  if (!data.length) {
-    const canvas = $('#trendChart');
-    const c = canvas.getContext('2d');
-    c.save();
-    c.fillStyle = '#8892a6';
-    c.font = 'italic 14px Fraunces, serif';
-    c.textAlign = 'center';
-    c.fillText('Nincs adat ebben az időszakban', canvas.width/2/window.devicePixelRatio, canvas.height/2/window.devicePixelRatio);
-    c.restore();
-  }
-}
-
-function drawAmPmChart(all) {
-  const last7 = all.filter(r => withinDays(r.ts, 7));
-  const morning = last7.filter(r => {
-    const h = new Date(r.ts).getHours();
-    return h >= 4 && h < 12;
-  });
-  const evening = last7.filter(r => {
-    const h = new Date(r.ts).getHours();
-    return h >= 17 && h < 24;
-  });
-
-  const amSys = morning.length ? round(mean(morning.map(r=>r.sys))) : 0;
-  const amDia = morning.length ? round(mean(morning.map(r=>r.dia))) : 0;
-  const pmSys = evening.length ? round(mean(evening.map(r=>r.sys))) : 0;
-  const pmDia = evening.length ? round(mean(evening.map(r=>r.dia))) : 0;
-
-  const ctx = $('#amPmChart').getContext('2d');
-  const eveningPattern = makePrintPattern('diagonal');
-  if (amPmChart) amPmChart.destroy();
-
-  amPmChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: ['Szisztolés', 'Diasztolés'],
-      datasets: [
-        {
-          label: `Reggel (${morning.length})`,
-          data: [amSys, amDia],
-          backgroundColor: '#0b1220',
-          borderColor: '#0b1220',
-          borderWidth: 1.2,
-          borderRadius: 4,
-          barThickness: 28,
-        },
-        {
-          label: `Este (${evening.length})`,
-          data: [pmSys, pmDia],
-          backgroundColor: eveningPattern || '#c8432a',
-          borderColor: '#c8432a',
-          borderWidth: 1.2,
-          borderRadius: 4,
-          barThickness: 28,
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            font: { family: 'Inter Tight', size: 11, weight: '600' },
-            color: '#5c6479',
-            usePointStyle: true,
-            pointStyle: 'rect',
-            padding: 14,
-          }
-        },
-        tooltip: {
-          backgroundColor: '#0b1220',
-          titleFont: { family: 'Inter Tight', weight: '600' },
-          bodyFont: { family: 'JetBrains Mono', size: 12 },
-          padding: 10,
-          cornerRadius: 6,
-          callbacks: {
-            label: (item) => `  ${item.dataset.label}: ${item.parsed.y} Hgmm`
-          }
-        }
-      },
-      scales: {
-        x: {
-          grid: { display: false },
-          ticks: { font: { family: 'Inter Tight', size: 12, weight: '500' }, color: '#5c6479' }
-        },
-        y: {
-          beginAtZero: false,
-          grid: { color: 'rgba(11,18,32,0.05)' },
-          ticks: { font: { family: 'JetBrains Mono', size: 10 }, color: '#8892a6' }
-        }
-      }
-    }
-  });
-
-  // Note: morning surge?
-  const note = $('#ampmNote');
-  if (morning.length >= 2 && evening.length >= 2) {
-    const diff = amSys - pmSys;
-    if (diff >= 15) {
-      note.textContent = `A reggeli szisztolés átlag ${diff} Hgmm-rel magasabb, mint az esti. Jelentős reggeli emelkedés („morning surge") figyelhető meg — érdemes az orvosoddal megbeszélni.`;
-      note.classList.add('show');
-    } else if (diff <= -15) {
-      note.textContent = `Az esti átlag ${Math.abs(diff)} Hgmm-rel magasabb, mint a reggeli. Ez kevésbé jellemző mintázat — ha tartós, érdemes megbeszélni orvossal.`;
-      note.classList.add('show');
-    } else {
-      note.textContent = `A reggeli és esti átlagok különbsége ${Math.abs(diff)} Hgmm — jellemző, egészséges napi ritmus.`;
-      note.classList.add('show');
-    }
-  } else {
-    note.classList.remove('show');
-  }
 }
 
 // Range tab buttons
@@ -1083,13 +1159,10 @@ function summarizeReadings(readings) {
 }
 
 function buildAmPmRows(readings) {
-  const groups = [
-    { label: 'Reggel (04:00-11:59)', readings: readings.filter(r => { const h = new Date(r.ts).getHours(); return h >= 4 && h < 12; }) },
-    { label: 'Napközben (12:00-16:59)', readings: readings.filter(r => { const h = new Date(r.ts).getHours(); return h >= 12 && h < 17; }) },
-    { label: 'Este (17:00-23:59)', readings: readings.filter(r => { const h = new Date(r.ts).getHours(); return h >= 17 && h < 24; }) },
-    { label: 'Éjszaka (00:00-03:59)', readings: readings.filter(r => { const h = new Date(r.ts).getHours(); return h >= 0 && h < 4; }) },
-  ];
-  return groups.map(g => ({ label: g.label, ...summarizeReadings(g.readings) }));
+  return DAYPARTS.map(dp => ({
+    label: `${dp.label} (${dp.range})`,
+    ...summarizeReadings(readings.filter(r => dp.test(new Date(r.ts).getHours())))
+  }));
 }
 
 function dash(v, suffix = '') {
